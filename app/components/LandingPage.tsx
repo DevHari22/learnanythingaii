@@ -450,7 +450,7 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
           </div>
 
           {/* Top: logo */}
-          <div className="relative flex items-center gap-2.5">
+          {/* <div className="relative flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 backdrop-blur">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4 w-4 text-white">
                 <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
@@ -460,7 +460,7 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
             <span className="text-sm font-extrabold tracking-tight text-white">
               LearnAnything<span className="text-indigo-300">AI</span>
             </span>
-          </div>
+          </div> */}
 
           {/* Center: headline + copy */}
           <div className="relative">
@@ -469,7 +469,7 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-300 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-indigo-300" />
               </span>
-              <span className="text-xs font-medium text-indigo-200">Powered by Claude AI · Free to use</span>
+              {/* <span className="text-xs font-medium text-indigo-200">Powered by Claude AI · Free to use</span> */}
             </div>
 
             <h1 className="text-4xl font-black leading-[1.1] tracking-tight text-white sm:text-5xl">
@@ -501,7 +501,6 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
             </ul>
           </div>
 
-          {/* Bottom: stats */}
           <div className="relative grid grid-cols-3 gap-6 border-t border-white/10 pt-8">
             {[
               { n: "30s", label: "Avg. course generation" },
