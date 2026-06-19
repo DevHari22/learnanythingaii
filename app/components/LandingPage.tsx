@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
+const API = process.env.NEXT_PUBLIC_API_URL ;
 
 interface LandingPageProps {
   onSignIn: (email: string) => void;
@@ -348,19 +348,16 @@ function AnimatedNumber({ target, suffix = "" }: { target: number; suffix?: stri
 }
 
 /* ─── Feature card ──────────────────────────────────────────────── */
-function FeatureCard({ icon, iconBg, accent, title, desc }: {
-  icon: React.ReactNode; iconBg: string; accent: string; title: string; desc: string;
+function FeatureCard({ icon, iconBg, glowColor, title, desc }: {
+  icon: React.ReactNode; iconBg: string; glowColor: string; title: string; desc: string;
 }) {
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
-      <div className={`h-1.5 w-full ${accent}`} />
-      <div className="flex flex-1 flex-col p-6">
-        <div className={`mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl ${iconBg} shadow-sm`}>
-          {icon}
-        </div>
-        <h3 className="mb-2 text-base font-bold text-zinc-900">{title}</h3>
-        <p className="text-sm leading-relaxed text-zinc-600">{desc}</p>
+    <div className={`group relative flex flex-col rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm transition-all duration-300 hover:bg-white/10 hover:-translate-y-1 hover:shadow-xl ${glowColor}`}>
+      <div className={`mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl ${iconBg} shadow-lg`}>
+        {icon}
       </div>
+      <h3 className="mb-2 text-base font-bold text-white">{title}</h3>
+      <p className="text-sm leading-relaxed text-slate-400">{desc}</p>
     </div>
   );
 }
@@ -409,37 +406,54 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
     <div className="min-h-screen bg-white font-sans text-zinc-900 antialiased">
 
       {/* ── NAV ────────────────────────────────────────────────────── */}
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-200 bg-white/90 backdrop-blur-xl">
-        <div className="flex items-center justify-between px-8 py-3.5 lg:px-16">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 shadow-sm">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4 w-4 text-white">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-100 bg-white">
+        <div className="flex items-center justify-between px-8 py-4 lg:px-16">
+          {/* Logo — left-aligned, large */}
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 shadow-sm shadow-indigo-200">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-4.5 w-4.5 text-white">
                 <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
                 <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5" />
               </svg>
             </div>
-            <span className="text-base font-extrabold tracking-tight text-zinc-900">
+            <span className="text-lg font-extrabold tracking-tight text-zinc-900">
               LearnAnything<span className="text-indigo-600">AI</span>
             </span>
           </div>
 
-          <nav className="hidden items-center gap-7 text-sm font-medium text-zinc-500 sm:flex">
-            <a href="#features" className="transition-colors hover:text-zinc-900">Features</a>
-            <a href="#how-it-works" className="transition-colors hover:text-zinc-900">How it works</a>
-            <a href="#faq" className="transition-colors hover:text-zinc-900">FAQ</a>
-          </nav>
-
-          <button
-            onClick={scrollToAuth}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-95"
-          >
-            Get started free
-          </button>
+          {/* Right side: nav + CTA grouped */}
+          <div className="hidden items-center gap-1 sm:flex">
+            <nav className="flex items-center gap-1 mr-4">
+              {[
+                { label: "Features", href: "#features" },
+                { label: "How it works", href: "#how-it-works" },
+                { label: "FAQ", href: "#faq" },
+              ].map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-lg px-3.5 py-2 text-sm font-medium text-zinc-500 transition-all hover:bg-zinc-50 hover:text-zinc-900"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </nav>
+            <div className="h-5 w-px bg-zinc-200 mr-4" />
+            <button
+              onClick={scrollToAuth}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-95"
+            >
+              Get started
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
       {/* ── HERO ───────────────────────────────────────────────────── */}
-      <section className="flex h-screen pt-[64px]">
+      <section className="flex h-screen pt-[65px]">
 
         {/* ── Left: dark marketing panel ── */}
         <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-950 px-12 py-10 lg:flex lg:w-[58%]">
@@ -501,15 +515,44 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
             </ul>
           </div>
 
-          <div className="relative grid grid-cols-3 gap-6 border-t border-white/10 pt-8">
+          <div className="relative space-y-3 border-t border-white/10 pt-8">
             {[
-              { n: "30s", label: "Avg. course generation" },
-              { n: "6+", label: "Learning activity types" },
-              { n: "2×", label: "Better recall via SR" },
-            ].map((s) => (
-              <div key={s.label}>
-                <p className="text-2xl font-black text-white">{s.n}</p>
-                <p className="mt-0.5 text-[11px] text-indigo-300">{s.label}</p>
+              {
+                label: "AI-generated quizzes per module",
+                sub: "MCQs and coding challenges auto-built from video content",
+                icon: (
+                  <svg className="h-4 w-4 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  </svg>
+                ),
+              },
+              {
+                label: "SM-2 spaced-repetition review engine",
+                sub: "Schedules daily reviews so knowledge sticks long-term",
+                icon: (
+                  <svg className="h-4 w-4 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ),
+              },
+              {
+                label: "AI learning coach in the video player",
+                sub: "Context-aware tutor that knows exactly which course you're on",
+                icon: (
+                  <svg className="h-4 w-4 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                  </svg>
+                ),
+              },
+            ].map((item) => (
+              <div key={item.label} className="flex items-start gap-3 rounded-xl bg-white/5 px-4 py-3">
+                <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white/10">
+                  {item.icon}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-white">{item.label}</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-indigo-300">{item.sub}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -611,51 +654,58 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
       </section>
 
       {/* ── FEATURES ───────────────────────────────────────────────── */}
-      <section id="features" className="bg-zinc-50 px-8 py-24 lg:px-16">
-        <div className="mb-14 text-center">
-          <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">Everything in one place</p>
-          <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-zinc-900 sm:text-4xl">
+      <section id="features" className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 px-8 py-24 lg:px-16">
+        {/* Background decoration */}
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-40 -top-40 h-[500px] w-[500px] rounded-full bg-indigo-600/10 blur-[120px]" />
+          <div className="absolute -bottom-40 -right-40 h-[500px] w-[500px] rounded-full bg-violet-600/10 blur-[120px]" />
+        </div>
+
+        <div className="relative mb-14 text-center">
+          <span className="inline-block rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-indigo-400">Everything in one place</span>
+          <h2 className="mt-4 text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
             Built for serious learners
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-base text-zinc-500">
+          <p className="mx-auto mt-4 max-w-xl text-base text-slate-400">
             Not just a video library. A complete learning system with every tool that research says actually produces retention.
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+
+        <div className="relative grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
             {
               icon: <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82V15a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" /></svg>,
-              iconBg: "bg-violet-600", accent: "bg-violet-500",
+              iconBg: "bg-violet-600", glowColor: "hover:shadow-violet-500/20",
               title: "AI Classroom from YouTube",
               desc: "Paste any YouTube tutorial URL. Get a fully structured course — modules, lessons, objectives, tags, and difficulty — generated in under 30 seconds.",
             },
             {
               icon: <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>,
-              iconBg: "bg-indigo-600", accent: "bg-indigo-500",
+              iconBg: "bg-indigo-600", glowColor: "hover:shadow-indigo-500/20",
               title: "Quizzes & Coding Assignments",
               desc: "Every module ships with auto-generated MCQ quizzes and hands-on coding assignments with automated test-case grading.",
             },
             {
               icon: <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-              iconBg: "bg-emerald-600", accent: "bg-emerald-500",
+              iconBg: "bg-emerald-600", glowColor: "hover:shadow-emerald-500/20",
               title: "Spaced-Repetition Reviews",
               desc: "The SM-2 algorithm schedules daily reviews for every question you've answered. Harder items come back sooner. Retention compounds over time.",
             },
             {
               icon: <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>,
-              iconBg: "bg-amber-500", accent: "bg-amber-400",
+              iconBg: "bg-amber-500", glowColor: "hover:shadow-amber-500/20",
               title: "Knowledge Intelligence Profile",
               desc: "Every concept across all your videos is tracked. See mastery scores, identify weak spots, and get video recommendations targeting exactly your gaps.",
             },
             {
               icon: <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>,
-              iconBg: "bg-rose-500", accent: "bg-rose-400",
+              iconBg: "bg-rose-500", glowColor: "hover:shadow-rose-500/20",
               title: "AI Learning Coach Chat",
               desc: "Stuck mid-video? Ask your AI tutor. It knows exactly which course you're on and delivers context-aware explanations right inside the player.",
             },
             {
               icon: <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
-              iconBg: "bg-cyan-600", accent: "bg-cyan-500",
+              iconBg: "bg-cyan-600", glowColor: "hover:shadow-cyan-500/20",
               title: "Progress Analytics",
               desc: "Track review streaks, weekly activity charts, mastery distribution radars, and an AI coach that tells you your exact next step.",
             },
@@ -765,25 +815,104 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
       </section>
 
       {/* ── HOW IT WORKS ───────────────────────────────────────────── */}
-      <section id="how-it-works" className="border-t border-zinc-200 bg-zinc-50 px-8 py-24 lg:px-16">
-        <div className="mb-14 text-center">
-          <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">Simple setup</p>
-          <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-zinc-900 sm:text-4xl">Up and learning in 4 steps</h2>
+      <section id="how-it-works" className="border-t border-zinc-200 bg-white px-8 py-24 lg:px-16">
+        <div className="mb-16 text-center">
+          <span className="inline-block rounded-full bg-indigo-50 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-indigo-600 border border-indigo-100">Simple setup</span>
+          <h2 className="mt-4 text-3xl font-extrabold tracking-tight text-zinc-900 sm:text-4xl">Up and learning in 4 steps</h2>
+          <p className="mx-auto mt-3 max-w-lg text-sm text-zinc-500">Everything you need to turn any YouTube tutorial into a structured learning experience — set up in under 2 minutes.</p>
         </div>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { n: "01", icon: "🧩", title: "Install extension", desc: "Add the LearnAnythingAI Chrome extension from the web store. One click, no config." },
-            { n: "02", icon: "▶️", title: "Open any tutorial", desc: "Navigate to any YouTube tutorial — coding, design, cooking, music, math, anything." },
-            { n: "03", icon: "⚡", title: "Generate classroom", desc: 'Click "Generate Classroom" in the extension panel. AI builds your course in ~30 seconds.' },
-            { n: "04", icon: "🎯", title: "Learn & review daily", desc: "Watch with your syllabus, take quizzes, get assignments, and do daily spaced reviews." },
-          ].map((step, i) => (
-            <div key={i} className="relative rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
-              <div className="absolute right-4 top-4 text-xs font-bold text-zinc-300">{step.n}</div>
-              <div className="text-3xl mb-3">{step.icon}</div>
-              <h3 className="text-sm font-bold text-zinc-900 mb-2">{step.title}</h3>
-              <p className="text-xs text-zinc-500 leading-relaxed">{step.desc}</p>
-            </div>
-          ))}
+
+        <div className="relative">
+          {/* Connecting line (desktop only) */}
+          <div className="absolute left-0 right-0 top-12 hidden h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent lg:block" style={{ top: "3rem" }} />
+
+          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                n: "01",
+                color: "bg-indigo-600",
+                ring: "ring-indigo-100",
+                textColor: "text-indigo-600",
+                bgLight: "bg-indigo-50",
+                title: "Install extension",
+                desc: "Add the LearnAnythingAI Chrome extension from the web store. One click, no config.",
+                icon: (
+                  <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15l6-6m0 0V5m0 4H9" />
+                  </svg>
+                ),
+              },
+              {
+                n: "02",
+                color: "bg-violet-600",
+                ring: "ring-violet-100",
+                textColor: "text-violet-600",
+                bgLight: "bg-violet-50",
+                title: "Open any tutorial",
+                desc: "Navigate to any YouTube tutorial — coding, design, cooking, music, math, anything.",
+                icon: (
+                  <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ),
+              },
+              {
+                n: "03",
+                color: "bg-amber-500",
+                ring: "ring-amber-100",
+                textColor: "text-amber-600",
+                bgLight: "bg-amber-50",
+                title: "Generate classroom",
+                desc: 'Click "Generate Classroom" in the extension panel. AI builds your course in ~30 seconds.',
+                icon: (
+                  <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                ),
+              },
+              {
+                n: "04",
+                color: "bg-emerald-600",
+                ring: "ring-emerald-100",
+                textColor: "text-emerald-600",
+                bgLight: "bg-emerald-50",
+                title: "Learn & review daily",
+                desc: "Watch with your syllabus, take quizzes, get assignments, and do daily spaced reviews.",
+                icon: (
+                  <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ),
+              },
+            ].map((step, i) => (
+              <div key={i} className="group relative flex flex-col items-center text-center">
+                {/* Step number bubble */}
+                <div className="relative z-10 mb-5">
+                  <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${step.color} shadow-lg ring-4 ${step.ring} transition-transform duration-200 group-hover:scale-110`}>
+                    {step.icon}
+                  </div>
+                  <span className={`absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full ${step.bgLight} text-[9px] font-extrabold ${step.textColor} ring-2 ring-white`}>
+                    {step.n}
+                  </span>
+                </div>
+
+                {/* Arrow connector (desktop only) */}
+                {i < 3 && (
+                  <div className="absolute left-[calc(50%+36px)] top-[26px] hidden w-[calc(100%-72px)] items-center lg:flex" style={{ pointerEvents: "none" }}>
+                    <div className="h-px flex-1 border-t-2 border-dashed border-zinc-200" />
+                    <svg className="h-3 w-3 flex-shrink-0 text-zinc-300" fill="currentColor" viewBox="0 0 6 6">
+                      <path d="M0 0l6 3-6 3V0z" />
+                    </svg>
+                  </div>
+                )}
+
+                <h3 className="mb-2 text-base font-bold text-zinc-900">{step.title}</h3>
+                <p className="text-sm leading-relaxed text-zinc-500">{step.desc}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
