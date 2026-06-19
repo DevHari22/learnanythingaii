@@ -326,7 +326,7 @@ export default function DashboardPage() {
     videoTitle?: string | null
   ) => {
     try {
-      await fetch("${API}/api/reviews/grade", {
+      await fetch(`${API}/api/reviews/grade`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, videoId, questionId, correct, question, videoTitle }),
@@ -546,7 +546,7 @@ export default function DashboardPage() {
       );
 
       try {
-        await fetch("${API}/api/classrooms/save", {
+        await fetch(`${API}/api/classrooms/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -595,7 +595,7 @@ export default function DashboardPage() {
       const current = selectedClassroomRef.current;
       if (!current) return;
       try {
-        await fetch("${API}/api/classrooms/save", {
+        await fetch(`${API}/api/classrooms/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -763,7 +763,7 @@ export default function DashboardPage() {
 
     // Make sure this course's quiz questions are tagged with concepts (idempotent;
     // the server skips if already tagged) so graded answers feed the learner model.
-    fetch("${API}/api/concepts/tag", {
+    fetch(`${API}/api/concepts/tag`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, videoId: record.videoId }),
@@ -815,7 +815,7 @@ export default function DashboardPage() {
     setRecapLoading(true);
     setRecapOpen(true);
     try {
-      const res = await fetch("${API}/api/recap", {
+      const res = await fetch(`${API}/api/recap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -864,7 +864,7 @@ export default function DashboardPage() {
 
     // Save update to backend
     try {
-      await fetch("${API}/api/classrooms/save", {
+      await fetch(`${API}/api/classrooms/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -910,7 +910,7 @@ export default function DashboardPage() {
 
     // Save update to backend
     try {
-      await fetch("${API}/api/classrooms/save", {
+      await fetch(`${API}/api/classrooms/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
