@@ -379,7 +379,7 @@ export default function DashboardPage() {
   };
 
   const savePreferences = async (prefs: UserPreferences) => {
-    const res = await fetch("${API}/api/users/preferences", {
+    const res = await fetch(`${API}/api/users/preferences`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, ...prefs }),
@@ -944,7 +944,7 @@ export default function DashboardPage() {
     setChatLoading(true);
 
     try {
-      const res = await fetch("${API}/api/chat", {
+      const res = await fetch(`${API}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
