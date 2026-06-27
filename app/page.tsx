@@ -157,9 +157,9 @@ function formatInlineMarkdown(raw: string): string {
     .replace(/\n/g, "<br/>");
 }
 
-function renderMarkdown(content: string): JSX.Element {
+function renderMarkdown(content: string): React.ReactElement {
   const codeBlockRe = /```(\w*)\n?([\s\S]*?)```/g;
-  const elements: JSX.Element[] = [];
+  const elements: React.ReactElement[] = [];
   let lastIdx = 0;
   let match: RegExpExecArray | null;
   let key = 0;
