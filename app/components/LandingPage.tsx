@@ -45,12 +45,15 @@ function SpinIcon() {
 function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
   const [tab, setTab] = useState<"signin" | "signup">("signin");
 
+  // Sign-in
   const [siEmail, setSiEmail] = useState("");
   const [siPass, setSiPass] = useState("");
   const [siShowPass, setSiShowPass] = useState(false);
   const [siLoading, setSiLoading] = useState(false);
   const [siError, setSiError] = useState("");
 
+  // Sign-up form
+  const [suStep, setSuStep] = useState<"form" | "otp" | "success">("form");
   const [suName, setSuName] = useState("");
   const [suEmail, setSuEmail] = useState("");
   const [suPass, setSuPass] = useState("");
@@ -59,20 +62,40 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
   const [suShowConfirm, setSuShowConfirm] = useState(false);
   const [suLoading, setSuLoading] = useState(false);
   const [suError, setSuError] = useState("");
-  const [suSuccess, setSuSuccess] = useState(false);
+
+  // OTP
+  const [suOtp, setSuOtp] = useState(["", "", "", "", "", ""]);
+  const [suOtpLoading, setSuOtpLoading] = useState(false);
+  const [suOtpError, setSuOtpError] = useState("");
+  const [suResendTimer, setSuResendTimer] = useState(60);
+  const [suResendKey, setSuResendKey] = useState(0);
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  useEffect(() => {
+    if (suStep !== "otp") return;
+    setSuResendTimer(60);
+    const interval = setInterval(() => {
+      setSuResendTimer(t => {
+        if (t <= 1) { clearInterval(interval); return 0; }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [suStep, suResendKey]);
 
   const switchTab = (t: "signin" | "signup") => {
     setTab(t);
     setSiError("");
     setSuError("");
-    setSuSuccess(false);
+    setSuOtpError("");
+    setSuStep("form");
+    setSuOtp(["", "", "", "", "", ""]);
   };
 
   const handleSignIn = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!siEmail.trim() || !siPass) { setSiError("Please fill in all fields."); return; }
-    setSiLoading(true);
-    setSiError("");
+    setSiLoading(true); setSiError("");
     try {
       const res = await fetch(`${API}/api/users/login`, {
         method: "POST",
@@ -100,8 +123,7 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
     if (!suEmail.includes("@")) { setSuError("Enter a valid email address."); return; }
     if (suPass.length < 6) { setSuError("Password must be at least 6 characters."); return; }
     if (suPass !== suConfirm) { setSuError("Passwords don't match."); return; }
-    setSuLoading(true);
-    setSuError("");
+    setSuLoading(true); setSuError("");
     try {
       const res = await fetch(`${API}/api/users/register`, {
         method: "POST",
@@ -110,11 +132,7 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
       });
       const body = await res.json();
       if (res.ok && body.success) {
-        setSuSuccess(true);
-        setTimeout(() => {
-          setSiEmail(suEmail.trim());
-          switchTab("signin");
-        }, 1600);
+        setSuStep("otp");
       } else {
         setSuError(body.detail?.message || body.error || "Registration failed.");
       }
@@ -125,7 +143,74 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
     }
   };
 
+  const handleVerifyOtp = async (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    const otp = suOtp.join("");
+    if (otp.length < 6) { setSuOtpError("Please enter all 6 digits."); return; }
+    setSuOtpLoading(true); setSuOtpError("");
+    try {
+      const res = await fetch(`${API}/api/users/verify-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: suEmail.trim(), otp }),
+      });
+      const body = await res.json();
+      if (res.ok && body.success) {
+        setSuStep("success");
+        setTimeout(() => { setSiEmail(suEmail.trim()); switchTab("signin"); }, 2000);
+      } else {
+        setSuOtpError(body.detail?.message || body.error || "Invalid code.");
+      }
+    } catch {
+      setSuOtpError("Cannot reach the server.");
+    } finally {
+      setSuOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    try {
+      await fetch(`${API}/api/users/resend-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: suEmail.trim() }),
+      });
+    } catch {}
+    setSuOtp(["", "", "", "", "", ""]); setSuOtpError("");
+    setSuResendKey(k => k + 1);
+    setTimeout(() => otpRefs.current[0]?.focus(), 50);
+  };
+
+  const handleOtpChange = (val: string, idx: number) => {
+    if (!/^\d*$/.test(val)) return;
+    const next = [...suOtp]; next[idx] = val.slice(-1);
+    setSuOtp(next); setSuOtpError("");
+    if (val && idx < 5) otpRefs.current[idx + 1]?.focus();
+  };
+
+  const handleOtpKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.key === "Backspace" && !suOtp[idx] && idx > 0) otpRefs.current[idx - 1]?.focus();
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+    const next = ["", "", "", "", "", ""];
+    pasted.split("").forEach((c, i) => { next[i] = c; });
+    setSuOtp(next); setSuOtpError("");
+    otpRefs.current[Math.min(pasted.length, 5)]?.focus();
+  };
+
   const inputCls = "w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+  const errBox = (msg: string) => (
+    <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-600">
+      <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      {msg}
+    </div>
+  );
 
   return (
     <div className="w-full rounded-2xl border border-zinc-200 bg-white shadow-lg shadow-zinc-200/60">
@@ -137,9 +222,7 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
               key={t}
               onClick={() => switchTab(t)}
               className={`flex-1 rounded-md py-2 text-xs font-semibold transition-all ${
-                tab === t
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-500 hover:text-zinc-700"
+                tab === t ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
               }`}
             >
               {t === "signin" ? "Sign In" : "Create Account"}
@@ -147,62 +230,33 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
           ))}
         </div>
 
-        {/* ── Sign In form ── */}
+        {/* ── Sign In ── */}
         {tab === "signin" && (
           <form onSubmit={handleSignIn} className="space-y-3">
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Email</label>
-              <input
-                type="email"
-                placeholder="you@example.com"
-                value={siEmail}
-                onChange={(e) => { setSiEmail(e.target.value); setSiError(""); }}
-                autoFocus
-                className={inputCls}
-              />
+              <input type="email" placeholder="you@example.com" value={siEmail}
+                onChange={(e) => { setSiEmail(e.target.value); setSiError(""); }} autoFocus className={inputCls} />
             </div>
             <div>
               <div className="mb-1 flex items-center justify-between">
                 <label className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Password</label>
-                <button type="button" className="text-[10px] text-indigo-600 hover:text-indigo-700 transition-colors">
-                  Forgot?
-                </button>
+                <button type="button" className="text-[10px] text-indigo-600 hover:text-indigo-700 transition-colors">Forgot?</button>
               </div>
               <div className="relative">
-                <input
-                  type={siShowPass ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={siPass}
-                  onChange={(e) => { setSiPass(e.target.value); setSiError(""); }}
-                  className={`${inputCls} pr-11`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setSiShowPass((p) => !p)}
-                  className="absolute inset-y-0 right-3.5 flex items-center text-zinc-400 hover:text-zinc-600 transition-colors"
-                >
+                <input type={siShowPass ? "text" : "password"} placeholder="••••••••" value={siPass}
+                  onChange={(e) => { setSiPass(e.target.value); setSiError(""); }} className={`${inputCls} pr-11`} />
+                <button type="button" onClick={() => setSiShowPass(p => !p)}
+                  className="absolute inset-y-0 right-3.5 flex items-center text-zinc-400 hover:text-zinc-600 transition-colors">
                   <EyeIcon open={siShowPass} />
                 </button>
               </div>
             </div>
-
-            {siError && (
-              <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-600">
-                <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {siError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={siLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60"
-            >
+            {siError && errBox(siError)}
+            <button type="submit" disabled={siLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60">
               {siLoading ? <><SpinIcon /> Signing in…</> : "Sign in →"}
             </button>
-
             <p className="text-center text-[11px] text-zinc-500">
               No account?{" "}
               <button type="button" onClick={() => switchTab("signup")} className="text-indigo-600 hover:text-indigo-700 font-semibold transition-colors">
@@ -212,59 +266,29 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
           </form>
         )}
 
-        {/* ── Sign Up form ── */}
+        {/* ── Sign Up ── */}
         {tab === "signup" && (
-          <form onSubmit={handleSignUp} className="space-y-3">
-            {suSuccess ? (
-              <div className="flex flex-col items-center gap-3 py-6 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 ring-2 ring-emerald-200">
-                  <svg className="h-7 w-7 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="font-bold text-zinc-900">Account created!</p>
-                  <p className="mt-1 text-xs text-zinc-500">Redirecting you to sign in…</p>
-                </div>
-              </div>
-            ) : (
-              <>
+          <>
+            {/* Step 1: registration form */}
+            {suStep === "form" && (
+              <form onSubmit={handleSignUp} className="space-y-3">
                 <div>
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Full name</label>
-                  <input
-                    type="text"
-                    placeholder="Alex Johnson"
-                    value={suName}
-                    onChange={(e) => { setSuName(e.target.value); setSuError(""); }}
-                    autoFocus
-                    className={inputCls}
-                  />
+                  <input type="text" placeholder="Alex Johnson" value={suName}
+                    onChange={(e) => { setSuName(e.target.value); setSuError(""); }} autoFocus className={inputCls} />
                 </div>
                 <div>
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Email</label>
-                  <input
-                    type="email"
-                    placeholder="you@example.com"
-                    value={suEmail}
-                    onChange={(e) => { setSuEmail(e.target.value); setSuError(""); }}
-                    className={inputCls}
-                  />
+                  <input type="email" placeholder="you@example.com" value={suEmail}
+                    onChange={(e) => { setSuEmail(e.target.value); setSuError(""); }} className={inputCls} />
                 </div>
                 <div>
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Password</label>
                   <div className="relative">
-                    <input
-                      type={suShowPass ? "text" : "password"}
-                      placeholder="Min. 6 characters"
-                      value={suPass}
-                      onChange={(e) => { setSuPass(e.target.value); setSuError(""); }}
-                      className={`${inputCls} pr-11`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSuShowPass((p) => !p)}
-                      className="absolute inset-y-0 right-3.5 flex items-center text-zinc-400 hover:text-zinc-600 transition-colors"
-                    >
+                    <input type={suShowPass ? "text" : "password"} placeholder="Min. 6 characters" value={suPass}
+                      onChange={(e) => { setSuPass(e.target.value); setSuError(""); }} className={`${inputCls} pr-11`} />
+                    <button type="button" onClick={() => setSuShowPass(p => !p)}
+                      className="absolute inset-y-0 right-3.5 flex items-center text-zinc-400 hover:text-zinc-600 transition-colors">
                       <EyeIcon open={suShowPass} />
                     </button>
                   </div>
@@ -272,49 +296,101 @@ function AuthCard({ onSignIn }: { onSignIn: (email: string) => void }) {
                 <div>
                   <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Confirm password</label>
                   <div className="relative">
-                    <input
-                      type={suShowConfirm ? "text" : "password"}
-                      placeholder="Re-enter password"
-                      value={suConfirm}
-                      onChange={(e) => { setSuConfirm(e.target.value); setSuError(""); }}
-                      className={`${inputCls} pr-11`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSuShowConfirm((p) => !p)}
-                      className="absolute inset-y-0 right-3.5 flex items-center text-zinc-400 hover:text-zinc-600 transition-colors"
-                    >
+                    <input type={suShowConfirm ? "text" : "password"} placeholder="Re-enter password" value={suConfirm}
+                      onChange={(e) => { setSuConfirm(e.target.value); setSuError(""); }} className={`${inputCls} pr-11`} />
+                    <button type="button" onClick={() => setSuShowConfirm(p => !p)}
+                      className="absolute inset-y-0 right-3.5 flex items-center text-zinc-400 hover:text-zinc-600 transition-colors">
                       <EyeIcon open={suShowConfirm} />
                     </button>
                   </div>
                 </div>
-
-                {suError && (
-                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-600">
-                    <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    {suError}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={suLoading}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60"
-                >
-                  {suLoading ? <><SpinIcon /> Creating account…</> : "Create free account →"}
+                {suError && errBox(suError)}
+                <button type="submit" disabled={suLoading}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60">
+                  {suLoading ? <><SpinIcon /> Sending code…</> : "Create free account →"}
                 </button>
-
                 <p className="text-center text-[11px] text-zinc-500">
                   Have an account?{" "}
                   <button type="button" onClick={() => switchTab("signin")} className="text-indigo-600 hover:text-indigo-700 font-semibold transition-colors">
                     Sign in
                   </button>
                 </p>
-              </>
+              </form>
             )}
-          </form>
+
+            {/* Step 2: OTP verification */}
+            {suStep === "otp" && (
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div className="text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50">
+                    <svg className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-bold text-zinc-900">Check your email</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    We sent a 6-digit code to<br />
+                    <span className="font-semibold text-zinc-700">{suEmail}</span>
+                  </p>
+                </div>
+
+                <div className="flex justify-center gap-2">
+                  {suOtp.map((digit, idx) => (
+                    <input
+                      key={idx}
+                      ref={el => { otpRefs.current[idx] = el; }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={digit}
+                      onChange={e => handleOtpChange(e.target.value, idx)}
+                      onKeyDown={e => handleOtpKeyDown(e, idx)}
+                      onPaste={handleOtpPaste}
+                      autoFocus={idx === 0}
+                      className="h-11 w-10 rounded-xl border border-zinc-200 bg-zinc-50 text-center text-lg font-bold text-zinc-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                    />
+                  ))}
+                </div>
+
+                {suOtpError && errBox(suOtpError)}
+
+                <button type="submit" disabled={suOtpLoading || suOtp.join("").length < 6}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60">
+                  {suOtpLoading ? <><SpinIcon /> Verifying…</> : "Verify Email →"}
+                </button>
+
+                <div className="text-center text-[11px] text-zinc-500">
+                  {suResendTimer > 0 ? (
+                    <span>Resend code in <span className="font-semibold text-zinc-700">{suResendTimer}s</span></span>
+                  ) : (
+                    <button type="button" onClick={handleResendOtp} className="text-indigo-600 hover:text-indigo-700 font-semibold transition-colors">
+                      Resend code
+                    </button>
+                  )}
+                  {" · "}
+                  <button type="button" onClick={() => { setSuStep("form"); setSuOtp(["", "", "", "", "", ""]); setSuOtpError(""); }}
+                    className="text-zinc-400 hover:text-zinc-600 transition-colors">
+                    ← Change email
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Step 3: success */}
+            {suStep === "success" && (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 ring-2 ring-emerald-200">
+                  <svg className="h-7 w-7 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-bold text-zinc-900">Email verified!</p>
+                  <p className="mt-1 text-xs text-zinc-500">Redirecting you to sign in…</p>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

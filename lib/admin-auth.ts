@@ -1,5 +1,5 @@
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "superadmin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@LAI2025";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "ALAI2025dmin@";
 const SESSION_SECRET = process.env.SESSION_SECRET || "lai-secret-changeme";
 
 export function validateCredentials(username: string, password: string): boolean {

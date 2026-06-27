@@ -139,6 +139,146 @@ interface KnowledgeProfile {
   };
 }
 
+/* ─── Markdown helpers (no external deps) ──────────────────────────────── */
+
+function formatInlineMarkdown(raw: string): string {
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`([^`\n]+)`/g, '<code style="background:rgba(99,102,241,0.12);padding:1px 5px;border-radius:4px;font-family:ui-monospace,monospace;font-size:10.5px;color:#4338ca">$1</code>')
+    .replace(/^### (.+)$/gm, '<div style="font-size:12px;font-weight:700;margin:10px 0 3px;color:#1e293b">$1</div>')
+    .replace(/^## (.+)$/gm, '<div style="font-size:13px;font-weight:700;margin:10px 0 3px;color:#1e293b">$1</div>')
+    .replace(/^# (.+)$/gm, '<div style="font-size:14px;font-weight:700;margin:10px 0 3px;color:#1e293b">$1</div>')
+    .replace(/^[*-] (.+)$/gm, '<div style="margin:2px 0;padding-left:14px;position:relative"><span style="position:absolute;left:4px;color:#6366f1">•</span>$1</div>')
+    .replace(/^(\d+)\. (.+)$/gm, '<div style="margin:2px 0;padding-left:18px;position:relative"><span style="position:absolute;left:0;font-weight:600;color:#6366f1;font-size:10px">$1.</span>$2</div>')
+    .replace(/\n/g, "<br/>");
+}
+
+function renderMarkdown(content: string): JSX.Element {
+  const codeBlockRe = /```(\w*)\n?([\s\S]*?)```/g;
+  const elements: JSX.Element[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = codeBlockRe.exec(content)) !== null) {
+    if (match.index > lastIdx) {
+      elements.push(
+        <div key={key++} className="text-xs leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(content.slice(lastIdx, match.index)) }} />
+      );
+    }
+    const lang = match[1] || "";
+    const code = match[2].replace(/\n$/, "");
+    elements.push(
+      <div key={key++} className="my-2 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 text-left">
+        {lang && (
+          <div className="px-3 py-1 text-[10px] text-zinc-400 bg-zinc-800 border-b border-zinc-700 font-mono">{lang}</div>
+        )}
+        <pre className="p-3 overflow-x-auto">
+          <code className="text-[11px] text-zinc-100 font-mono leading-relaxed whitespace-pre">{code}</code>
+        </pre>
+      </div>
+    );
+    lastIdx = match.index + match[0].length;
+  }
+
+  if (lastIdx < content.length) {
+    elements.push(
+      <div key={key++} className="text-xs leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(content.slice(lastIdx)) }} />
+    );
+  }
+
+  return <div className="space-y-1">{elements.length ? elements : <span className="text-xs">{content}</span>}</div>;
+}
+
+/* ─── Notes: markdown→HTML converter (for AI Enhance output & legacy migration) ─ */
+function isStoredAsHtml(str: string): boolean {
+  return /<(?:div|p|h[1-6]|ul|ol|li|strong|em|br)\b/i.test(str);
+}
+
+function simpleMarkdownToHtml(md: string): string {
+  if (!md.trim()) return "";
+  const lines = md.split("\n");
+  const htmlLines: string[] = [];
+  let inPre = false;
+  let preLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("```")) {
+      if (inPre) {
+        const code = preLines.join("\n").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        htmlLines.push(`<pre><code>${code}</code></pre>`);
+        inPre = false; preLines = [];
+      } else { inPre = true; }
+      continue;
+    }
+    if (inPre) { preLines.push(line); continue; }
+
+    const esc = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const fmt = esc
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    if (/^### /.test(line)) htmlLines.push(`<h3>${fmt.slice(4)}</h3>`);
+    else if (/^## /.test(line)) htmlLines.push(`<h2>${fmt.slice(3)}</h2>`);
+    else if (/^# /.test(line)) htmlLines.push(`<h2>${fmt.slice(2)}</h2>`);
+    else if (/^[*-] /.test(line)) htmlLines.push(`<li>${fmt.slice(2)}</li>`);
+    else if (/^\d+\. /.test(line)) htmlLines.push(`<li>${fmt.replace(/^\d+\. /, "")}</li>`);
+    else if (line.trim() === "") htmlLines.push(`<div><br></div>`);
+    else htmlLines.push(`<div>${fmt}</div>`);
+  }
+
+  // Wrap adjacent <li> groups in <ul>
+  const result: string[] = [];
+  let i = 0;
+  while (i < htmlLines.length) {
+    if (htmlLines[i].startsWith("<li>")) {
+      const liGroup: string[] = [];
+      while (i < htmlLines.length && htmlLines[i].startsWith("<li>")) { liGroup.push(htmlLines[i]); i++; }
+      result.push(`<ul>${liGroup.join("")}</ul>`);
+    } else { result.push(htmlLines[i]); i++; }
+  }
+  return result.join("\n");
+}
+
+function buildSuggestedQuestions(classroom: Classroom, activeLessonId: string | null): string[] {
+  const { course, modules = [] } = classroom;
+  const qs: string[] = [];
+
+  if (activeLessonId) {
+    for (const mod of modules) {
+      const l = mod.lessons?.find((x) => x.id === activeLessonId);
+      if (l) { qs.push(`Explain "${l.title}" in simple terms`); break; }
+    }
+  }
+  if (modules[0]) qs.push(`What will I learn in "${modules[0].title}"?`);
+  if (course.skills?.length) qs.push(`How do I apply ${course.skills[0]} in a real project?`);
+  if (modules[0]?.quiz?.questions?.length) qs.push(`Quiz me on ${modules[0].title}`);
+  if (course.learningObjectives?.length) {
+    qs.push("What are the key learning objectives of this course?");
+  } else {
+    qs.push("What are the most important concepts in this course?");
+  }
+  const fallbacks = [
+    `Summarise what "${course.title}" covers`,
+    "What should I know before starting this course?",
+    "What are common mistakes learners make in this topic?",
+  ];
+  for (const f of fallbacks) {
+    if (qs.length >= 5) break;
+    if (!qs.includes(f)) qs.push(f);
+  }
+  return qs.slice(0, 5);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
 export default function DashboardPage() {
   const [email, setEmail] = useState<string>("");
   const [classrooms, setClassrooms] = useState<ClassroomRecord[]>([]);
@@ -158,12 +298,18 @@ export default function DashboardPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>("");
   const [chatLoading, setChatLoading] = useState<boolean>(false);
+  const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Notes states
   const [noteText, setNoteText] = useState<string>("");
   const [noteStatus, setNoteStatus] = useState<string>("");
   const [savingNote, setSavingNote] = useState<boolean>(false);
+  const [noteEditorKey, setNoteEditorKey] = useState<number>(0);
+  const [noteAiLoading, setNoteAiLoading] = useState<boolean>(false);
+  const noteEditorRef = useRef<HTMLDivElement>(null);
+  const noteAutoSaveRef = useRef<any>(null);
 
   // Interest profile + personalized video suggestions
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
@@ -184,6 +330,12 @@ export default function DashboardPage() {
   const [dashboardTimeline, setDashboardTimeline] = useState<any>(null);
   const [dashboardNextStep, setDashboardNextStep] = useState<any>(null);
   const [nextStepLoading, setNextStepLoading] = useState(false);
+
+  // Generate classroom from URL
+  const [generateUrl, setGenerateUrl] = useState<string>("");
+  const [generateLoading, setGenerateLoading] = useState<boolean>(false);
+  const [generateStep, setGenerateStep] = useState<"idle" | "fetching" | "details" | "saving" | "error">("idle");
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   // Resume recap ("welcome back") state.
   const [recapOpen, setRecapOpen] = useState<boolean>(false);
@@ -704,11 +856,11 @@ export default function DashboardPage() {
       );
       if (res.ok) {
         const body = await res.json();
-        if (body.success && body.data) {
-          setNoteText(body.data.noteText || "");
-        } else {
-          setNoteText("");
-        }
+        const raw = body.success && body.data ? (body.data.noteText || "") : "";
+        // Auto-migrate legacy markdown notes to HTML
+        const html = raw ? (isStoredAsHtml(raw) ? raw : simpleMarkdownToHtml(raw)) : "";
+        setNoteText(html);
+        setNoteEditorKey((k) => k + 1);
       }
     } catch (err) {
       console.warn("Failed to load notes:", err);
@@ -716,31 +868,82 @@ export default function DashboardPage() {
   };
 
   // Save notes for a course
-  const saveNotesForCourse = async () => {
+  const saveNotesForCourse = async (textOverride?: string) => {
     if (!selectedClassroom) return;
+    const textToSave = textOverride !== undefined ? textOverride : (noteEditorRef.current?.innerHTML ?? noteText);
     setSavingNote(true);
-    setNoteStatus("Saving...");
+    setNoteStatus("Saving…");
     try {
-      const res = await fetch("${API}/api/notes/save", {
+      const res = await fetch(`${API}/api/notes/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          videoId: selectedClassroom.videoId,
-          noteText,
-        }),
+        body: JSON.stringify({ email, videoId: selectedClassroom.videoId, noteText: textToSave }),
       });
       if (res.ok) {
         setNoteStatus("Saved!");
         setTimeout(() => setNoteStatus(""), 2000);
       } else {
-        setNoteStatus("Failed to save note");
+        setNoteStatus("Failed to save");
       }
     } catch (err) {
       console.error("Notes save failed:", err);
-      setNoteStatus("Failed to save note");
+      setNoteStatus("Failed to save");
     } finally {
       setSavingNote(false);
+    }
+  };
+
+  const handleEditorInput = () => {
+    const html = noteEditorRef.current?.innerHTML || "";
+    setNoteText(html);
+    clearTimeout(noteAutoSaveRef.current);
+    noteAutoSaveRef.current = setTimeout(() => saveNotesForCourse(html), 2500);
+  };
+
+  const execFormat = (command: string, value?: string) => {
+    noteEditorRef.current?.focus();
+    document.execCommand(command, false, value ?? "");
+    const html = noteEditorRef.current?.innerHTML || "";
+    setNoteText(html);
+    clearTimeout(noteAutoSaveRef.current);
+    noteAutoSaveRef.current = setTimeout(() => saveNotesForCourse(html), 2500);
+  };
+
+  const insertNoteHTML = (html: string) => {
+    noteEditorRef.current?.focus();
+    document.execCommand("insertHTML", false, html);
+    const result = noteEditorRef.current?.innerHTML || "";
+    setNoteText(result);
+    clearTimeout(noteAutoSaveRef.current);
+    noteAutoSaveRef.current = setTimeout(() => saveNotesForCourse(result), 2500);
+  };
+
+  const handleEnhanceNotes = async () => {
+    const plainText = noteEditorRef.current?.innerText?.trim() || noteText.trim();
+    if (!plainText || !selectedClassroom) return;
+    setNoteAiLoading(true);
+    try {
+      const res = await fetch(`${API}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `Here are my raw study notes:\n\n${plainText}\n\nPlease enhance them: fix structure, add missing key points from the course syllabus, and organise with ## headings and bullet points. Keep all my original ideas but make the notes more complete and clear. Return only the improved notes, no extra commentary.`,
+          history: [],
+          courseOutline: selectedClassroom.classroom,
+        }),
+      });
+      const body = await res.json();
+      if (body.success && body.response) {
+        const html = simpleMarkdownToHtml(body.response);
+        setNoteText(html);
+        setNoteEditorKey((k) => k + 1);
+        clearTimeout(noteAutoSaveRef.current);
+        noteAutoSaveRef.current = setTimeout(() => saveNotesForCourse(html), 2500);
+      }
+    } catch (err) {
+      console.error("AI enhance failed:", err);
+    } finally {
+      setNoteAiLoading(false);
     }
   };
 
@@ -751,6 +954,7 @@ export default function DashboardPage() {
     setChatMessages([]);
     setNoteText("");
     setNoteStatus("");
+    setNoteEditorKey((k) => k + 1);
     
     // Set initial YouTube iframe source
     const startSec = record.lastTimestamp > 0 ? record.lastTimestamp : 0;
@@ -931,17 +1135,29 @@ export default function DashboardPage() {
   };
 
   // Send AI Chatbot query
-  const sendChatQuery = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendChatQuery = async (e?: React.FormEvent | React.KeyboardEvent) => {
+    e?.preventDefault();
     const query = chatInput.trim();
-    if (!query || !selectedClassroom) return;
+    if (!query || !selectedClassroom || chatLoading) return;
 
     const userMessage: ChatMessage = { role: "user", content: query };
     const nextMessages = [...chatMessages, userMessage];
-    
+
     setChatMessages(nextMessages);
     setChatInput("");
     setChatLoading(true);
+    // Reset textarea height
+    if (chatInputRef.current) chatInputRef.current.style.height = "36px";
+
+    // Resolve active lesson/module titles for context-aware answers
+    let activeLessonTitle: string | undefined;
+    let activeModuleTitle: string | undefined;
+    if (activeLessonId) {
+      for (const mod of selectedClassroom.classroom.modules) {
+        const lesson = mod.lessons?.find((l) => l.id === activeLessonId);
+        if (lesson) { activeLessonTitle = lesson.title; activeModuleTitle = mod.title; break; }
+      }
+    }
 
     try {
       const res = await fetch(`${API}/api/chat`, {
@@ -951,6 +1167,7 @@ export default function DashboardPage() {
           message: query,
           history: chatMessages,
           courseOutline: selectedClassroom.classroom,
+          ...(activeLessonTitle && { activeLessonTitle, activeModuleTitle }),
         }),
       });
       if (res.ok) {
@@ -1207,7 +1424,11 @@ export default function DashboardPage() {
             </div>
 
             {/* Tab Body */}
-            <div className="flex-1 overflow-y-auto p-4 min-h-0">
+            <div className={`flex-1 min-h-0 ${
+              workspaceTab === "chat" || workspaceTab === "notes"
+                ? "overflow-hidden p-0"
+                : "overflow-y-auto p-4"
+            }`}>
               
               {/* TAB 1: Syllabus Checklist */}
               {workspaceTab === "syllabus" && (
@@ -1281,99 +1502,397 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* TAB 2: AI Chatbot */}
+              {/* TAB 2: Interactive AI Chat */}
               {workspaceTab === "chat" && (
-                <div className="flex flex-col h-[calc(100vh-130px)] bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm">
-                  {/* Messages list */}
-                  <div className="flex-1 p-4 overflow-y-auto space-y-4 min-h-0 scrollbar-thin">
+                <div className="flex flex-col h-full bg-white border-l border-zinc-200 overflow-hidden">
+
+                  {/* ── Chat header ── */}
+                  <div className="border-b border-zinc-100 px-4 py-2.5 flex items-center justify-between bg-gradient-to-r from-indigo-50/60 to-white flex-shrink-0">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                        <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-bold text-zinc-900 leading-tight">AI Study Coach</div>
+                        {activeLessonId && (() => {
+                          let t = "";
+                          for (const mod of selectedClassroom!.classroom.modules) {
+                            const l = mod.lessons?.find((x) => x.id === activeLessonId);
+                            if (l) { t = l.title; break; }
+                          }
+                          return t ? (
+                            <div className="text-[9px] text-indigo-500 font-medium truncate max-w-[180px]">
+                              ▶ {t}
+                            </div>
+                          ) : null;
+                        })()}
+                      </div>
+                    </div>
+                    {chatMessages.length > 0 && (
+                      <button
+                        onClick={() => setChatMessages([])}
+                        className="text-[10px] text-zinc-400 hover:text-zinc-700 font-semibold px-2 py-1 rounded-lg hover:bg-zinc-100 transition-all"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ── Quick action chips ── */}
+                  <div className="border-b border-zinc-100 px-3 py-2 flex gap-1.5 flex-wrap bg-zinc-50/60 flex-shrink-0">
+                    {[
+                      { label: "Explain lesson", icon: "📖" },
+                      { label: "Quiz me", icon: "🎯" },
+                      { label: "Key takeaways", icon: "✨" },
+                      { label: "What to focus on?", icon: "🔍" },
+                    ].map((action) => (
+                      <button
+                        key={action.label}
+                        disabled={chatLoading}
+                        onClick={() => {
+                          let q = action.label;
+                          if (action.label === "Explain lesson") {
+                            let title = "";
+                            if (activeLessonId) {
+                              for (const mod of selectedClassroom!.classroom.modules) {
+                                const l = mod.lessons?.find((x) => x.id === activeLessonId);
+                                if (l) { title = l.title; break; }
+                              }
+                            }
+                            q = title
+                              ? `Explain "${title}" clearly with examples`
+                              : "Explain the current lesson clearly with examples";
+                          } else if (action.label === "Quiz me") {
+                            q = "Give me one quiz question about what I've been learning. Wait for my answer before revealing the correct one.";
+                          } else if (action.label === "Key takeaways") {
+                            q = "What are the key takeaways from this course so far?";
+                          } else {
+                            q = "What should I focus on to master this course?";
+                          }
+                          setChatInput(q);
+                          setTimeout(() => chatInputRef.current?.focus(), 50);
+                        }}
+                        className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-zinc-600 hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50 transition-all disabled:opacity-50"
+                      >
+                        <span>{action.icon}</span>
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ── Messages ── */}
+                  <div className="flex-1 p-4 overflow-y-auto space-y-5 min-h-0">
                     {chatMessages.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8">
-                        <span className="text-3xl">🤖</span>
-                        <h4 className="mt-2 text-xs font-bold text-zinc-800">LearnAnythingAI Study Assistant</h4>
-                        <p className="mt-1 text-[11px] text-zinc-500 max-w-[240px]">
-                          Ask questions about any concepts, code implementations, or modules in this course.
-                        </p>
+                      <div className="h-full flex flex-col items-center justify-center text-center px-3 gap-4">
+                        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
+                          <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-zinc-800">Ask me anything about this course</p>
+                          <p className="mt-1 text-[11px] text-zinc-500 max-w-[210px] leading-relaxed">
+                            I know your full syllabus — explain concepts, quiz you, or guide what to study next.
+                          </p>
+                        </div>
+                        <div className="w-full flex flex-col gap-1.5">
+                          {buildSuggestedQuestions(selectedClassroom!.classroom, activeLessonId).map((q, i) => (
+                            <button
+                              key={i}
+                              onClick={() => { setChatInput(q); setTimeout(() => chatInputRef.current?.focus(), 50); }}
+                              className="w-full text-left rounded-xl border border-zinc-200 bg-zinc-50 hover:border-indigo-300 hover:bg-indigo-50 px-3 py-2.5 text-[11px] font-medium text-zinc-700 hover:text-indigo-700 transition-all"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ) : (
                       chatMessages.map((msg, index) => {
                         const isUser = msg.role === "user";
                         return (
-                          <div
-                            key={index}
-                            className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                          >
-                            <div
-                              className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs shadow-sm leading-relaxed ${
+                          <div key={index} className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+                            {!isUser && (
+                              <div className="h-6 w-6 rounded-lg bg-indigo-600 flex-shrink-0 flex items-center justify-center mt-0.5 shadow-sm">
+                                <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                </svg>
+                              </div>
+                            )}
+                            <div className={`group relative max-w-[86%]`}>
+                              <div className={`rounded-2xl px-3.5 py-2.5 shadow-sm leading-relaxed ${
                                 isUser
-                                  ? "bg-indigo-600 text-white rounded-br-none"
-                                  : "bg-zinc-100 text-zinc-850 rounded-bl-none"
-                              }`}
-                            >
-                              <p className="whitespace-pre-line">{msg.content}</p>
+                                  ? "bg-indigo-600 text-white rounded-br-none text-xs"
+                                  : "bg-white border border-zinc-200 text-zinc-800 rounded-bl-none"
+                              }`}>
+                                {isUser
+                                  ? <p className="whitespace-pre-line text-xs">{msg.content}</p>
+                                  : renderMarkdown(msg.content)
+                                }
+                              </div>
+                              {!isUser && (
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(msg.content);
+                                    setCopiedMsgIdx(index);
+                                    setTimeout(() => setCopiedMsgIdx(null), 2000);
+                                  }}
+                                  className="absolute -bottom-5 left-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-600 font-medium"
+                                >
+                                  {copiedMsgIdx === index ? (
+                                    <>
+                                      <svg className="h-3 w-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                      <span className="text-emerald-600">Copied!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                      </svg>
+                                      Copy
+                                    </>
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
                       })
                     )}
-                    
+
                     {chatLoading && (
-                      <div className="flex justify-start">
-                        <div className="bg-zinc-100 text-zinc-500 rounded-2xl rounded-bl-none px-3.5 py-2.5 text-xs shadow-sm flex items-center gap-1.5">
-                          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                      <div className="flex gap-2 justify-start">
+                        <div className="h-6 w-6 rounded-lg bg-indigo-600 flex-shrink-0 flex items-center justify-center shadow-sm">
+                          <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                          </svg>
+                        </div>
+                        <div className="bg-white border border-zinc-200 rounded-2xl rounded-bl-none px-3.5 py-2.5 shadow-sm flex items-center gap-1.5">
+                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                       </div>
                     )}
                     <div ref={chatBottomRef} />
                   </div>
 
-                  {/* Message Input form */}
-                  <form onSubmit={sendChatQuery} className="border-t border-zinc-200 p-2.5 flex items-center gap-2 bg-zinc-50 flex-shrink-0">
-                    <input
-                      type="text"
-                      placeholder="Ask the AI study assistant..."
+                  {/* ── Input ── */}
+                  <div className="border-t border-zinc-200 p-2.5 flex items-end gap-2 bg-white flex-shrink-0">
+                    <textarea
+                      ref={chatInputRef}
+                      rows={1}
+                      placeholder="Ask anything… (Enter to send, Shift+Enter for new line)"
                       value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
+                      onChange={(e) => {
+                        setChatInput(e.target.value);
+                        e.target.style.height = "auto";
+                        e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendChatQuery();
+                        }
+                      }}
                       disabled={chatLoading}
-                      className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 outline-none focus:border-indigo-400"
+                      className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-900 placeholder-zinc-400 outline-none focus:border-indigo-400 focus:bg-white transition-all overflow-hidden"
+                      style={{ minHeight: "36px", maxHeight: "96px" }}
                     />
                     <button
-                      type="submit"
-                      disabled={chatLoading}
-                      className="h-8 w-8 flex items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-all flex-shrink-0"
+                      onClick={() => sendChatQuery()}
+                      disabled={chatLoading || !chatInput.trim()}
+                      className="h-9 w-9 flex items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 transition-all flex-shrink-0"
                     >
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                       </svg>
                     </button>
-                  </form>
+                  </div>
                 </div>
               )}
 
-              {/* TAB 3: Notes Notepad */}
+              {/* TAB 3: Notes */}
               {workspaceTab === "notes" && (
-                <div className="flex flex-col h-[calc(100vh-130px)] bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm">
-                  <div className="flex-1 p-3 flex flex-col min-h-0">
-                    <textarea
-                      placeholder="Type your study notes here... Your notes are automatically saved to your account database."
-                      value={noteText}
-                      onChange={(e) => setNoteText(e.target.value)}
-                      className="flex-1 w-full p-2.5 text-xs text-zinc-800 placeholder-zinc-400 resize-none outline-none font-medium leading-relaxed bg-white border-0"
+                <div className="flex flex-col h-full bg-white border-l border-zinc-200 overflow-hidden">
+
+                  {/* Styles for the WYSIWYG editor content */}
+                  <style>{`
+                    .note-wysiwyg { outline: none; }
+                    .note-wysiwyg:empty::before { content: attr(data-placeholder); color: #a1a1aa; pointer-events: none; font-family: ui-sans-serif, system-ui, sans-serif; font-style: italic; }
+                    .note-wysiwyg h1, .note-wysiwyg h2 { font-size: 13px; font-weight: 700; color: #1e293b; margin: 10px 0 4px; line-height: 1.4; }
+                    .note-wysiwyg h3 { font-size: 12px; font-weight: 700; color: #334155; margin: 8px 0 3px; }
+                    .note-wysiwyg ul { list-style: disc; padding-left: 18px; margin: 4px 0; }
+                    .note-wysiwyg ol { list-style: decimal; padding-left: 18px; margin: 4px 0; }
+                    .note-wysiwyg li { margin: 2px 0; font-size: 11.5px; line-height: 1.65; }
+                    .note-wysiwyg strong { font-weight: 700; color: #1e293b; }
+                    .note-wysiwyg em { font-style: italic; }
+                    .note-wysiwyg code { background: rgba(99,102,241,0.1); color: #4338ca; padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 10.5px; }
+                    .note-wysiwyg pre { background: #18181b; color: #e4e4e7; padding: 10px 12px; border-radius: 8px; margin: 6px 0; overflow-x: auto; }
+                    .note-wysiwyg pre code { background: none; color: inherit; padding: 0; font-size: 10.5px; }
+                    .note-wysiwyg p, .note-wysiwyg div { font-size: 11.5px; line-height: 1.7; color: #27272a; min-height: 1em; }
+                  `}</style>
+
+                  {/* ── Notes header ── */}
+                  <div className="border-b border-zinc-100 px-4 py-2.5 flex items-center justify-between bg-zinc-50/60 flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-zinc-800">Study Notes</span>
+                      {noteEditorRef.current?.innerText?.trim() && (
+                        <span className="text-[10px] text-zinc-400 font-mono bg-zinc-100 px-1.5 py-0.5 rounded-full">
+                          {(noteEditorRef.current.innerText.trim().split(/\s+/).filter(Boolean).length)}w
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] text-zinc-400 italic">WYSIWYG</span>
+                    </div>
+                  </div>
+
+                  {/* ── Formatting toolbar ── */}
+                  <div className="border-b border-zinc-100 bg-white flex-shrink-0">
+
+                    {/* Row 1 — format buttons */}
+                    <div className="px-3 py-1.5 flex items-center gap-0.5">
+                      <button title="Bold (Ctrl+B)" onMouseDown={(e) => { e.preventDefault(); execFormat("bold"); }}
+                        className="h-7 w-7 flex items-center justify-center rounded-md text-sm font-bold text-zinc-700 hover:bg-zinc-100 transition-all">
+                        B
+                      </button>
+                      <button title="Italic (Ctrl+I)" onMouseDown={(e) => { e.preventDefault(); execFormat("italic"); }}
+                        className="h-7 w-7 flex items-center justify-center rounded-md text-sm font-serif italic text-zinc-700 hover:bg-zinc-100 transition-all">
+                        I
+                      </button>
+                      <button title="Underline (Ctrl+U)" onMouseDown={(e) => { e.preventDefault(); execFormat("underline"); }}
+                        className="h-7 w-7 flex items-center justify-center rounded-md text-sm underline text-zinc-700 hover:bg-zinc-100 transition-all">
+                        U
+                      </button>
+                      <button title="Heading 2" onMouseDown={(e) => { e.preventDefault(); execFormat("formatBlock", "h2"); }}
+                        className="h-7 px-2 flex items-center justify-center rounded-md text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 transition-all">
+                        H2
+                      </button>
+                      <button title="Heading 3" onMouseDown={(e) => { e.preventDefault(); execFormat("formatBlock", "h3"); }}
+                        className="h-7 px-2 flex items-center justify-center rounded-md text-[11px] font-semibold text-zinc-500 hover:bg-zinc-100 transition-all">
+                        H3
+                      </button>
+
+                      <div className="h-4 w-px bg-zinc-200 mx-1.5" />
+
+                      <button title="Bullet list" onMouseDown={(e) => { e.preventDefault(); execFormat("insertUnorderedList"); }}
+                        className="h-7 w-7 flex items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 transition-all">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <line x1="9" y1="6" x2="20" y2="6" /><line x1="9" y1="12" x2="20" y2="12" /><line x1="9" y1="18" x2="20" y2="18" />
+                          <circle cx="4" cy="6" r="1.5" fill="currentColor" stroke="none" /><circle cx="4" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none" />
+                        </svg>
+                      </button>
+                      <button title="Numbered list" onMouseDown={(e) => { e.preventDefault(); execFormat("insertOrderedList"); }}
+                        className="h-7 w-7 flex items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 transition-all">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <line x1="10" y1="6" x2="21" y2="6" /><line x1="10" y1="12" x2="21" y2="12" /><line x1="10" y1="18" x2="21" y2="18" />
+                          <path d="M4 8V4H3" strokeLinecap="round" /><line x1="3" y1="8" x2="5" y2="8" strokeLinecap="round" />
+                          <path d="M3 14h2l-2 2h2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+
+                      <div className="h-4 w-px bg-zinc-200 mx-1.5" />
+
+                      <button title="Inline code" onMouseDown={(e) => { e.preventDefault(); insertNoteHTML("<code>code</code>"); }}
+                        className="h-7 px-2 flex items-center justify-center rounded-md font-mono text-[10px] font-semibold text-indigo-600 hover:bg-zinc-100 transition-all border border-zinc-200 bg-zinc-50">
+                        `code`
+                      </button>
+                      <button title="Code block" onMouseDown={(e) => { e.preventDefault(); insertNoteHTML("<pre><code>code here</code></pre><div><br></div>"); }}
+                        className="h-7 px-2 flex items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 transition-all border border-zinc-200 bg-zinc-50">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {/* Row 2 — templates + AI */}
+                    <div className="px-3 py-1.5 flex items-center gap-1.5 border-t border-zinc-50 bg-zinc-50/40">
+                      <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mr-1 flex-shrink-0">Insert</span>
+                      <div className="flex items-center gap-1 flex-1 flex-wrap">
+                        {[
+                          { label: "📌 Key Concepts", html: "<h2>Key Concepts</h2><ul><li></li><li></li><li></li></ul><div><br></div>" },
+                          { label: "📝 Summary",      html: "<h2>Summary</h2><div><br></div>" },
+                          { label: "❓ Questions",    html: "<h2>Questions</h2><ul><li></li><li></li></ul><div><br></div>" },
+                          { label: "💡 Takeaways",   html: "<h2>My Takeaways</h2><div><br></div>" },
+                        ].map((t) => (
+                          <button key={t.label}
+                            onMouseDown={(e) => { e.preventDefault(); insertNoteHTML(t.html); }}
+                            className="rounded-full border border-zinc-200 bg-white hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 px-2.5 py-0.5 text-[10px] font-medium text-zinc-600 transition-all">
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); handleEnhanceNotes(); }}
+                        disabled={noteAiLoading || !noteText.trim()}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold transition-all disabled:opacity-50 flex-shrink-0 shadow-sm">
+                        {noteAiLoading
+                          ? <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                          : <span>✨</span>}
+                        {noteAiLoading ? "Enhancing…" : "AI Enhance"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ── WYSIWYG Editor body ── */}
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    <div
+                      key={noteEditorKey}
+                      ref={noteEditorRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      className="note-wysiwyg h-full w-full px-4 py-3"
+                      data-placeholder="Start taking notes… Select text then click B to bold it, or use the toolbar to insert headings and lists."
+                      dangerouslySetInnerHTML={{ __html: noteText }}
+                      onInput={handleEditorInput}
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        const text = e.clipboardData.getData("text/plain");
+                        document.execCommand("insertText", false, text);
+                      }}
                     />
                   </div>
-                  
-                  <div className="border-t border-zinc-200 px-4 py-2.5 bg-zinc-50 flex items-center justify-between flex-shrink-0">
-                    <span className="text-[10px] font-semibold text-zinc-500 font-mono">
-                      {noteStatus || (savingNote ? "Saving..." : "")}
+
+                  {/* ── Footer ── */}
+                  <div className="border-t border-zinc-200 px-4 py-2 bg-zinc-50/80 flex items-center justify-between flex-shrink-0">
+                    <span className="text-[10px] font-medium font-mono">
+                      {savingNote ? (
+                        <span className="text-zinc-400">Saving…</span>
+                      ) : noteStatus === "Saved!" ? (
+                        <span className="text-emerald-600">✓ Saved</span>
+                      ) : noteStatus ? (
+                        <span className="text-rose-500">{noteStatus}</span>
+                      ) : noteText.trim() ? (
+                        <span className="text-zinc-400">Auto-saves while you type</span>
+                      ) : null}
                     </span>
-                    <button
-                      onClick={saveNotesForCourse}
-                      disabled={savingNote}
-                      className="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 text-xs font-semibold shadow-sm transition-all"
-                    >
-                      Save Notes
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          const text = noteEditorRef.current?.innerText || "";
+                          navigator.clipboard.writeText(text);
+                          setNoteStatus("Copied!");
+                          setTimeout(() => setNoteStatus(""), 2000);
+                        }}
+                        disabled={!noteText.trim()}
+                        title="Copy all notes as plain text"
+                        className="px-2.5 py-1.5 rounded-lg border border-zinc-200 text-[10px] font-semibold text-zinc-600 hover:bg-zinc-100 transition-all disabled:opacity-40"
+                      >
+                        Copy
+                      </button>
+                      <button
+                        onClick={() => saveNotesForCourse()}
+                        disabled={savingNote}
+                        className="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 text-[10px] font-semibold shadow-sm transition-all disabled:opacity-60"
+                      >
+                        Save
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
