@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import LandingPage from "./components/LandingPage";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "${API}";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
 
 interface Lesson {
   id: string;
@@ -29,6 +29,7 @@ interface Quiz {
 interface Assignment {
   id: string;
   title: string;
+  type?: "coding" | "written" | "project" | "research";
   description: string;
   difficulty: string;
   estimatedTime: string;
@@ -336,6 +337,10 @@ export default function DashboardPage() {
   const [generateLoading, setGenerateLoading] = useState<boolean>(false);
   const [generateStep, setGenerateStep] = useState<"idle" | "fetching" | "details" | "saving" | "error">("idle");
   const [generateError, setGenerateError] = useState<string | null>(null);
+
+  // Regenerate quiz + assignment
+  const [regenLoading, setRegenLoading] = useState<boolean>(false);
+  const [regenDone, setRegenDone] = useState<boolean>(false);
 
   // Resume recap ("welcome back") state.
   const [recapOpen, setRecapOpen] = useState<boolean>(false);
@@ -1134,6 +1139,62 @@ export default function DashboardPage() {
     }
   };
 
+  // Regenerate quiz and assignment for the current classroom
+  const regenerateQuizAssignment = async () => {
+    if (!selectedClassroom || regenLoading) return;
+    setRegenLoading(true);
+    setRegenDone(false);
+    try {
+      const res = await fetch(`${API}/api/generate/details`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: selectedClassroom.videoId,
+          outline: selectedClassroom.classroom,
+        }),
+      });
+      if (!res.ok) throw new Error("Generation request failed");
+      const body = await res.json();
+      if (!body.success || !body.data) throw new Error("No data returned");
+
+      // Merge new quiz+assignment into existing modules (preserve lessons/timestamps)
+      const newMods: any[] = body.data.modules || [];
+      const mergedModules = selectedClassroom.classroom.modules.map((mod) => {
+        const updated = newMods.find((m) => m.id === mod.id);
+        if (!updated) return mod;
+        return { ...mod, quiz: updated.quiz ?? mod.quiz, assignment: updated.assignment ?? mod.assignment };
+      });
+
+      const updatedClassroom: Classroom = { ...selectedClassroom.classroom, modules: mergedModules };
+      const updatedRecord: ClassroomRecord = { ...selectedClassroom, classroom: updatedClassroom };
+
+      setSelectedClassroom(updatedRecord);
+      setClassrooms((prev) => prev.map((c) => c.videoId === selectedClassroom.videoId ? updatedRecord : c));
+      setRegenDone(true);
+      setTimeout(() => setRegenDone(false), 3000);
+
+      await fetch(`${API}/api/classrooms/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          videoId: selectedClassroom.videoId,
+          videoTitle: selectedClassroom.videoTitle,
+          videoUrl: selectedClassroom.videoUrl,
+          classroom: updatedClassroom,
+          completedLessons: selectedClassroom.completedLessons,
+          lastLessonId: selectedClassroom.lastLessonId,
+          lastTimestamp: selectedClassroom.lastTimestamp,
+          quizResults: selectedClassroom.quizResults,
+        }),
+      });
+    } catch (err) {
+      console.error("Regeneration failed:", err);
+    } finally {
+      setRegenLoading(false);
+    }
+  };
+
   // Send AI Chatbot query
   const sendChatQuery = async (e?: React.FormEvent | React.KeyboardEvent) => {
     e?.preventDefault();
@@ -1899,20 +1960,62 @@ export default function DashboardPage() {
 
               {/* TAB 4: Quiz */}
               {workspaceTab === "quiz" && (
-                <QuizTabPanel
-                  classroomData={selectedClassroom.classroom}
-                  quizResults={selectedClassroom.quizResults}
-                  onSaveQuizResult={handleSaveQuizResult}
-                />
+                <div className="space-y-3">
+                  {/* Regenerate bar */}
+                  <div className="flex items-center justify-between bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Quiz</span>
+                      {regenDone && <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">✓ Regenerated!</span>}
+                    </div>
+                    <button
+                      onClick={regenerateQuizAssignment}
+                      disabled={regenLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 bg-white hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 text-[10px] font-semibold text-zinc-600 transition-all disabled:opacity-50 shadow-sm"
+                    >
+                      {regenLoading ? (
+                        <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                      ) : (
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.1-3.1M20 15a9 9 0 01-14.1 3.1" /></svg>
+                      )}
+                      {regenLoading ? "Regenerating…" : "Regenerate Quiz & Assignment"}
+                    </button>
+                  </div>
+                  <QuizTabPanel
+                    classroomData={selectedClassroom.classroom}
+                    quizResults={selectedClassroom.quizResults}
+                    onSaveQuizResult={handleSaveQuizResult}
+                  />
+                </div>
               )}
 
               {/* TAB 5: Assignment */}
               {workspaceTab === "assignment" && (
-                <AssignmentTabPanel
-                  classroomData={selectedClassroom.classroom}
-                  email={email}
-                  videoId={selectedClassroom.videoId}
-                />
+                <div className="space-y-3">
+                  {/* Regenerate bar */}
+                  <div className="flex items-center justify-between bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Assignment</span>
+                      {regenDone && <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">✓ Regenerated!</span>}
+                    </div>
+                    <button
+                      onClick={regenerateQuizAssignment}
+                      disabled={regenLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 bg-white hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 text-[10px] font-semibold text-zinc-600 transition-all disabled:opacity-50 shadow-sm"
+                    >
+                      {regenLoading ? (
+                        <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                      ) : (
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.1-3.1M20 15a9 9 0 01-14.1 3.1" /></svg>
+                      )}
+                      {regenLoading ? "Regenerating…" : "Regenerate Quiz & Assignment"}
+                    </button>
+                  </div>
+                  <AssignmentTabPanel
+                    classroomData={selectedClassroom.classroom}
+                    email={email}
+                    videoId={selectedClassroom.videoId}
+                  />
+                </div>
               )}
 
             </div>
@@ -5112,20 +5215,35 @@ interface AssignmentCardComponentProps {
 }
 
 function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, videoId, moduleId }: AssignmentCardComponentProps) {
+  // Determine assignment type: explicit field takes priority.
+  // For legacy data (no type field), only treat as coding if BOTH the course AND the assignment fields indicate coding.
+  // This prevents music/art/business courses from showing a code editor on old pre-fix data.
+  const isCodingAssignment = assignment.type === "coding" || (
+    !assignment.type && isCodingCourse && (!!assignment.functionName || (assignment.testCases?.length ?? 0) > 0)
+  );
+
+  const assignmentTypeLabel: Record<string, string> = {
+    coding: "💻 Coding Challenge",
+    written: "✍️ Written Assignment",
+    project: "🎨 Project",
+    research: "🔍 Research Task",
+  };
+  const typeLabel = assignment.type ? (assignmentTypeLabel[assignment.type] || "📝 Assignment") : (isCodingAssignment ? "💻 Coding Challenge" : "✍️ Written Assignment");
+
   const fnName = assignment.functionName || "solution";
 
   const getInitialCode = () => {
     if (isPython) {
       const argsStr = assignment.testCases?.[0]
         ? (Array.isArray(assignment.testCases[0].input)
-            ? assignment.testCases[0].input.map((_, i) => `arg${i+1}`).join(", ")
+            ? assignment.testCases[0].input.map((_: any, i: number) => `arg${i+1}`).join(", ")
             : "val")
         : "";
       return `# Write your Python solution here\ndef ${fnName}(${argsStr}):\n    # Your logic goes here\n    return None\n`;
     } else {
       const argsStr = assignment.testCases?.[0]
         ? (Array.isArray(assignment.testCases[0].input)
-            ? assignment.testCases[0].input.map((_, i) => `arg${i+1}`).join(", ")
+            ? assignment.testCases[0].input.map((_: any, i: number) => `arg${i+1}`).join(", ")
             : "val")
         : "";
       return `// Write your JS solution here\nfunction ${fnName}(${argsStr}) {\n  // Your logic goes here\n  return null;\n}\n`;
@@ -5133,9 +5251,12 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
   };
 
   const [code, setCode] = useState("");
+  const [writtenResponse, setWrittenResponse] = useState("");
+  const [checkedReqs, setCheckedReqs] = useState<Set<number>>(new Set());
+  const [submitted, setSubmitted] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState("");
   const [testResults, setTestResults] = useState<any>(null);
-  const [showCompiler, setShowCompiler] = useState(isCodingCourse);
+  const [showCompiler, setShowCompiler] = useState(isCodingAssignment);
   const [compilerTab, setCompilerTab] = useState<"code" | "tests" | "output">("code");
   const [isExecuting, setIsExecuting] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
@@ -5146,16 +5267,10 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
     setIsSaving(true);
     setSaveStatus("Saving...");
     try {
-      const res = await fetch("${API}/api/assignments/solution", {
+      const res = await fetch(`${API}/api/assignments/solution`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          videoId,
-          moduleId,
-          code: currentCode,
-          passed: passedVal
-        })
+        body: JSON.stringify({ email, videoId, moduleId, code: currentCode, passed: passedVal })
       });
       if (res.ok) {
         setSaveStatus("Saved");
@@ -5174,28 +5289,29 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
     let active = true;
     const fetchSolution = async () => {
       if (!email || !videoId || !moduleId) {
-        setCode(getInitialCode());
+        if (isCodingAssignment) setCode(getInitialCode());
         return;
       }
-      setSaveStatus("Loading solution...");
+      setSaveStatus("Loading...");
       try {
         const url = `${API}/api/assignments/solution?email=${encodeURIComponent(email)}&videoId=${encodeURIComponent(videoId)}&moduleId=${encodeURIComponent(moduleId)}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error("Load failed");
         const body = await res.json();
         if (active) {
-          if (body.success && body.data && body.data.code) {
-            setCode(body.data.code);
-            setSaveStatus("Loaded");
-            setTimeout(() => setSaveStatus(""), 2000);
+          const saved = body.success && body.data && body.data.code ? body.data.code : null;
+          if (isCodingAssignment) {
+            setCode(saved || getInitialCode());
           } else {
-            setCode(getInitialCode());
-            setSaveStatus("");
+            setWrittenResponse(saved || "");
+            if (body.data?.passed) setSubmitted(true);
           }
+          setSaveStatus(saved ? "Loaded" : "");
+          if (saved) setTimeout(() => setSaveStatus(""), 2000);
         }
       } catch (err) {
         if (active) {
-          setCode(getInitialCode());
+          if (isCodingAssignment) setCode(getInitialCode());
           setSaveStatus("Failed to load");
         }
       }
@@ -5205,11 +5321,20 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
     setConsoleOutput("");
     setTestResults(null);
     setCompilerTab("code");
-    
-    return () => {
-      active = false;
-    };
+    setCheckedReqs(new Set());
+    setSubmitted(false);
+
+    return () => { active = false; };
   }, [assignment, email, videoId, moduleId, isPython]);
+
+  // Debounced auto-save for written responses
+  useEffect(() => {
+    if (!writtenResponse.trim() || isCodingAssignment) return;
+    const timer = setTimeout(() => {
+      saveSolution(writtenResponse, false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [writtenResponse]);
 
   // Debounced auto-save
   useEffect(() => {
@@ -5229,7 +5354,7 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
     let codePassed = false;
     if (isPython) {
       try {
-        const res = await fetch("${API}/api/execute", {
+        const res = await fetch(`${API}/api/execute`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -5331,12 +5456,14 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
       {/* Title block */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-650 flex-shrink-0 text-sm">
-            📝
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 border border-indigo-100 flex-shrink-0 text-base">
+            {isCodingAssignment ? "💻" : assignment.type === "project" ? "🎨" : assignment.type === "research" ? "🔍" : "✍️"}
           </div>
           <div>
-            <h4 className="text-xs font-bold text-zinc-950 leading-snug">{assignment.title}</h4>
-            {/* Meta row */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h4 className="text-xs font-bold text-zinc-950 leading-snug">{assignment.title}</h4>
+              <span className="text-[9px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-full">{typeLabel}</span>
+            </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="inline-flex items-center gap-1 rounded bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-650">
                 Difficulty: {assignment.difficulty || "N/A"}
@@ -5353,32 +5480,98 @@ function AssignmentCardComponent({ assignment, isCodingCourse, isPython, email, 
           </div>
         </div>
 
-        <button
-          onClick={() => setShowCompiler(!showCompiler)}
-          className={`flex-shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-all border ${
-            showCompiler
-              ? "bg-zinc-50 border-zinc-300 text-zinc-700"
-              : "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
-          }`}
-        >
-          {showCompiler ? "Close Editor" : "Open Code Space"}
-        </button>
+        {isCodingAssignment && (
+          <button
+            onClick={() => setShowCompiler(!showCompiler)}
+            className={`flex-shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-all border ${
+              showCompiler
+                ? "bg-zinc-50 border-zinc-300 text-zinc-700"
+                : "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+            }`}
+          >
+            {showCompiler ? "Close Editor" : "Open Code Space"}
+          </button>
+        )}
       </div>
 
-      <div className="border-t border-zinc-100 pt-3 space-y-2">
+      <div className="border-t border-zinc-100 pt-3 space-y-3">
         <p className="text-xs text-zinc-600 leading-relaxed font-medium">
           {assignment.description}
         </p>
 
         {assignment.requirements && assignment.requirements.length > 0 && (
           <div className="bg-zinc-50 border border-zinc-150 rounded-xl p-3 space-y-1.5">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide block mb-1">Requirements:</span>
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide block mb-1">
+              {isCodingAssignment ? "Requirements:" : "Checklist:"}
+            </span>
             {assignment.requirements.map((req, ri) => (
-              <div key={ri} className="flex items-start gap-2 text-xs text-zinc-650 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0" />
-                <span>{req}</span>
-              </div>
+              isCodingAssignment ? (
+                <div key={ri} className="flex items-start gap-2 text-xs text-zinc-650 font-medium">
+                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0" />
+                  <span>{req}</span>
+                </div>
+              ) : (
+                <label key={ri} className="flex items-start gap-2 text-xs text-zinc-700 font-medium cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={checkedReqs.has(ri)}
+                    onChange={() => {
+                      setCheckedReqs((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(ri)) next.delete(ri); else next.add(ri);
+                        return next;
+                      });
+                    }}
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-300 text-indigo-600 flex-shrink-0 accent-indigo-600"
+                  />
+                  <span className={checkedReqs.has(ri) ? "line-through text-zinc-400" : ""}>{req}</span>
+                </label>
+              )
             ))}
+          </div>
+        )}
+
+        {/* ── Written / Project / Research response area ── */}
+        {!isCodingAssignment && (
+          <div className="space-y-2">
+            {submitted && (
+              <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
+                <span className="text-emerald-600 text-sm">✓</span>
+                <span className="text-[11px] font-semibold text-emerald-700">Submitted! Great work.</span>
+              </div>
+            )}
+            <div className="rounded-xl border border-zinc-200 overflow-hidden">
+              <div className="bg-zinc-50 border-b border-zinc-100 px-3 py-1.5 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Your Response</span>
+                <span className="text-[9px] text-zinc-400">{writtenResponse.trim().split(/\s+/).filter(Boolean).length} words</span>
+              </div>
+              <textarea
+                value={writtenResponse}
+                onChange={(e) => { setWrittenResponse(e.target.value); setSubmitted(false); }}
+                placeholder={
+                  assignment.type === "research"
+                    ? "Write your research findings here…"
+                    : assignment.type === "project"
+                    ? "Describe your project plan or output here…"
+                    : "Write your response here…"
+                }
+                className="w-full px-3 py-2.5 text-xs text-zinc-800 placeholder-zinc-400 resize-none outline-none leading-relaxed bg-white min-h-[180px]"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-zinc-400">
+                {checkedReqs.size > 0 && assignment.requirements?.length
+                  ? `${checkedReqs.size}/${assignment.requirements.length} checklist items done`
+                  : "Auto-saves as you type"}
+              </span>
+              <button
+                onClick={() => { saveSolution(writtenResponse, true); setSubmitted(true); }}
+                disabled={!writtenResponse.trim() || isSaving}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 text-[10px] font-bold transition-all disabled:opacity-50 shadow-sm"
+              >
+                {isSaving ? "Saving…" : submitted ? "✓ Submitted" : "Submit"}
+              </button>
+            </div>
           </div>
         )}
       </div>
