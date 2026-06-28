@@ -34,6 +34,8 @@
   },
   "host_permissions": [
     "*://*.youtube.com/*",
+    "*://*.googlevideo.com/*",
+    "*://*.googleapis.com/*",
     "https://learnanythingai-backend-production.up.railway.app/*"
   ],
   "web_accessible_resources": [
