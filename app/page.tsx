@@ -71,6 +71,7 @@ interface ClassroomRecord {
   lastLessonId: string | null;
   lastTimestamp: number;
   quizResults: Record<string, boolean>;
+  chatHistory?: ChatMessage[];
   createdAt: string;
   updatedAt: string;
 }
@@ -282,6 +283,7 @@ function buildSuggestedQuestions(classroom: Classroom, activeLessonId: string | 
 
 export default function DashboardPage() {
   const [email, setEmail] = useState<string>("");
+  const [userName, setUserName] = useState<string>("");
   const [classrooms, setClassrooms] = useState<ClassroomRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -550,8 +552,23 @@ export default function DashboardPage() {
     loadRecommendations(email);
   };
 
+  const fetchUserProfile = async (userEmail: string) => {
+    try {
+      const res = await fetch(`${API}/api/users/profile?email=${encodeURIComponent(userEmail)}`);
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && body.user) {
+          setUserName(body.user.name || "");
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch user profile:", err);
+    }
+  };
+
   useEffect(() => {
     if (email) {
+      fetchUserProfile(email);
       loadPreferences(email);
       loadReviewStats(email);
       loadKnowledge(email);
@@ -956,7 +973,7 @@ export default function DashboardPage() {
   const openClassroomWorkspace = (record: ClassroomRecord) => {
     setSelectedClassroom(record);
     setWorkspaceTab("syllabus");
-    setChatMessages([]);
+    setChatMessages(record.chatHistory || []);
     setNoteText("");
     setNoteStatus("");
     setNoteEditorKey((k) => k + 1);
@@ -1086,6 +1103,7 @@ export default function DashboardPage() {
           lastLessonId: selectedClassroom.lastLessonId,
           lastTimestamp: selectedClassroom.lastTimestamp,
           quizResults: selectedClassroom.quizResults,
+          chatHistory: selectedClassroom.chatHistory,
         }),
       });
     } catch (err) {
@@ -1132,6 +1150,7 @@ export default function DashboardPage() {
           lastLessonId: selectedClassroom.lastLessonId,
           lastTimestamp: selectedClassroom.lastTimestamp,
           quizResults: nextResults,
+          chatHistory: selectedClassroom.chatHistory,
         }),
       });
     } catch (err) {
@@ -1186,6 +1205,7 @@ export default function DashboardPage() {
           lastLessonId: selectedClassroom.lastLessonId,
           lastTimestamp: selectedClassroom.lastTimestamp,
           quizResults: selectedClassroom.quizResults,
+          chatHistory: selectedClassroom.chatHistory,
         }),
       });
     } catch (err) {
@@ -1228,16 +1248,43 @@ export default function DashboardPage() {
           message: query,
           history: chatMessages,
           courseOutline: selectedClassroom.classroom,
+          userName: userName || undefined,
           ...(activeLessonTitle && { activeLessonTitle, activeModuleTitle }),
         }),
       });
       if (res.ok) {
         const body = await res.json();
         if (body.success && body.response) {
-          setChatMessages([
+          const updatedMessages: ChatMessage[] = [
             ...nextMessages,
             { role: "assistant", content: body.response },
-          ]);
+          ];
+          setChatMessages(updatedMessages);
+
+          // Update classroom and classroom list states
+          const updatedRecord = { ...selectedClassroom, chatHistory: updatedMessages };
+          setSelectedClassroom(updatedRecord);
+          setClassrooms((prev) =>
+            prev.map((c) => (c.videoId === selectedClassroom.videoId ? updatedRecord : c))
+          );
+
+          // Save update to backend
+          fetch(`${API}/api/classrooms/save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email,
+              videoId: selectedClassroom.videoId,
+              videoTitle: selectedClassroom.videoTitle,
+              videoUrl: selectedClassroom.videoUrl,
+              classroom: selectedClassroom.classroom,
+              completedLessons: selectedClassroom.completedLessons,
+              lastLessonId: selectedClassroom.lastLessonId,
+              lastTimestamp: selectedClassroom.lastTimestamp,
+              quizResults: selectedClassroom.quizResults,
+              chatHistory: updatedMessages,
+            }),
+          }).catch((err) => console.warn("Failed to sync chat history:", err));
         }
       } else {
         setChatMessages([
@@ -1593,7 +1640,32 @@ export default function DashboardPage() {
                     </div>
                     {chatMessages.length > 0 && (
                       <button
-                        onClick={() => setChatMessages([])}
+                        onClick={() => {
+                          setChatMessages([]);
+                          if (selectedClassroom) {
+                            const updatedRecord = { ...selectedClassroom, chatHistory: [] };
+                            setSelectedClassroom(updatedRecord);
+                            setClassrooms((prev) =>
+                              prev.map((c) => (c.videoId === selectedClassroom.videoId ? updatedRecord : c))
+                            );
+                            fetch(`${API}/api/classrooms/save`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                email,
+                                videoId: selectedClassroom.videoId,
+                                videoTitle: selectedClassroom.videoTitle,
+                                videoUrl: selectedClassroom.videoUrl,
+                                classroom: selectedClassroom.classroom,
+                                completedLessons: selectedClassroom.completedLessons,
+                                lastLessonId: selectedClassroom.lastLessonId,
+                                lastTimestamp: selectedClassroom.lastTimestamp,
+                                quizResults: selectedClassroom.quizResults,
+                                chatHistory: [],
+                              }),
+                            }).catch((err) => console.warn("Failed to clear chat history:", err));
+                          }
+                        }}
                         className="text-[10px] text-zinc-400 hover:text-zinc-700 font-semibold px-2 py-1 rounded-lg hover:bg-zinc-100 transition-all"
                       >
                         Clear
