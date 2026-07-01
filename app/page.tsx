@@ -76,6 +76,25 @@ interface ClassroomRecord {
   updatedAt: string;
 }
 
+interface StudyGroup {
+  id: number;
+  code: string;
+  videoId: string;
+  videoTitle: string;
+  creatorEmail: string;
+  classroomData: any;
+  memberCount: number;
+}
+
+interface GroupMessage {
+  id: number;
+  groupId: number;
+  senderEmail: string;
+  senderName: string;
+  message: string;
+  createdAt: string;
+}
+
 interface UserPreferences {
   domains: string[];
   skills: string[];
@@ -293,7 +312,17 @@ export default function DashboardPage() {
 
   // Workspace / split-screen states
   const [selectedClassroom, setSelectedClassroom] = useState<ClassroomRecord | null>(null);
-  const [workspaceTab, setWorkspaceTab] = useState<"syllabus" | "chat" | "notes" | "quiz" | "assignment">("syllabus");
+  const [workspaceTab, setWorkspaceTab] = useState<"syllabus" | "chat" | "notes" | "quiz" | "assignment" | "group">("syllabus");
+
+  // Study Group states
+  const [activeGroup, setActiveGroup] = useState<StudyGroup | null>(null);
+  const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
+  const [groupChatInput, setGroupChatInput] = useState<string>("");
+  const [groupChatLoading, setGroupChatLoading] = useState<boolean>(false);
+  const [joinCodeInput, setJoinCodeInput] = useState<string>("");
+  const [isJoiningOrCreating, setIsJoiningOrCreating] = useState<boolean>(false);
+  const groupChatBottomRef = useRef<HTMLDivElement>(null);
+
   const [playerUrl, setPlayerUrl] = useState<string>("");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
 
@@ -357,7 +386,186 @@ export default function DashboardPage() {
   const [reviewLoading, setReviewLoading] = useState<boolean>(false);
   const [showKnowledgeModal, setShowKnowledgeModal] = useState<boolean>(false);
 
+  const fetchGroupMessages = async (groupId: number) => {
+    try {
+      const res = await fetch(`${API}/api/groups/messages?groupId=${groupId}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setGroupMessages(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch group messages:", err);
+    }
+  };
+
+  const fetchActiveGroup = async (userEmail: string, videoId: string) => {
+    try {
+      const res = await fetch(`${API}/api/groups/active?email=${encodeURIComponent(userEmail)}&videoId=${encodeURIComponent(videoId)}`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        setActiveGroup(data.data);
+        fetchGroupMessages(data.data.id);
+      } else {
+        setActiveGroup(null);
+        setGroupMessages([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch active group:", err);
+      setActiveGroup(null);
+      setGroupMessages([]);
+    }
+  };
+
+  const handleCreateGroup = async () => {
+    if (!email || !selectedClassroom) return;
+    setIsJoiningOrCreating(true);
+    try {
+      const res = await fetch(`${API}/api/groups/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          videoId: selectedClassroom.videoId,
+          videoTitle: selectedClassroom.videoTitle,
+          classroom: selectedClassroom.classroom
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActiveGroup(data.data);
+        setGroupMessages([]);
+      } else {
+        alert(data.detail?.message || "Failed to create study group.");
+      }
+    } catch (err) {
+      console.error("Create group failed:", err);
+      alert("Failed to create study group.");
+    } finally {
+      setIsJoiningOrCreating(false);
+    }
+  };
+
+  const handleJoinGroup = async () => {
+    const code = joinCodeInput.trim().toUpperCase();
+    if (!email || !code) return;
+    setIsJoiningOrCreating(true);
+    try {
+      const res = await fetch(`${API}/api/groups/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActiveGroup(data.data);
+        setJoinCodeInput("");
+        setGroupMessages([]);
+        await fetchClassrooms(email);
+        
+        if (!selectedClassroom || selectedClassroom.videoId !== data.data.videoId) {
+          const classroomsRes = await fetch(`${API}/api/classrooms?email=${encodeURIComponent(email)}`);
+          const classroomsData = await classroomsRes.json();
+          if (classroomsData.success && classroomsData.data) {
+            const joinedClassroom = classroomsData.data.find((c: any) => c.videoId === data.data.videoId);
+            if (joinedClassroom) {
+              openClassroomWorkspace(joinedClassroom);
+            }
+          }
+        }
+      } else {
+        alert(data.detail?.message || "Failed to join study group. Please check the code.");
+      }
+    } catch (err) {
+      console.error("Join group failed:", err);
+      alert("Failed to join study group.");
+    } finally {
+      setIsJoiningOrCreating(false);
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!email || !activeGroup) return;
+    if (!confirm("Are you sure you want to leave this study group?")) return;
+    try {
+      const res = await fetch(`${API}/api/groups/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, groupId: activeGroup.id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActiveGroup(null);
+        setGroupMessages([]);
+      } else {
+        alert("Failed to leave study group.");
+      }
+    } catch (err) {
+      console.error("Leave group failed:", err);
+      alert("Failed to leave study group.");
+    }
+  };
+
+  const handleSendGroupMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const msg = groupChatInput.trim();
+    if (!email || !activeGroup || !msg || groupChatLoading) return;
+    
+    setGroupChatLoading(true);
+    const tempId = Date.now();
+    const tempMsg: GroupMessage = {
+      id: tempId,
+      groupId: activeGroup.id,
+      senderEmail: email,
+      senderName: "Sending...",
+      message: msg,
+      createdAt: new Date().toISOString()
+    };
+    setGroupMessages(prev => [...prev, tempMsg]);
+    setGroupChatInput("");
+    
+    try {
+      const res = await fetch(`${API}/api/groups/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groupId: activeGroup.id,
+          email,
+          message: msg
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGroupMessages(prev => prev.map(m => m.id === tempId ? data.data : m));
+      } else {
+        setGroupMessages(prev => prev.filter(m => m.id !== tempId));
+        alert("Failed to send message.");
+      }
+    } catch (err) {
+      console.error("Post message failed:", err);
+      setGroupMessages(prev => prev.filter(m => m.id !== tempId));
+    } finally {
+      setGroupChatLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (workspaceTab !== "group" || !activeGroup) return;
+
+    fetchGroupMessages(activeGroup.id);
+
+    const interval = setInterval(() => {
+      fetchGroupMessages(activeGroup.id);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [workspaceTab, activeGroup?.id]);
+
+  useEffect(() => {
+    groupChatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [groupMessages]);
+
   const fetchClassrooms = async (userEmail: string) => {
+
     setLoading(true);
     setError(null);
     try {
@@ -977,6 +1185,7 @@ export default function DashboardPage() {
     setNoteText("");
     setNoteStatus("");
     setNoteEditorKey((k) => k + 1);
+    fetchActiveGroup(email, record.videoId);
     
     // Set initial YouTube iframe source
     const startSec = record.lastTimestamp > 0 ? record.lastTimestamp : 0;
@@ -1478,10 +1687,10 @@ export default function DashboardPage() {
           {/* Right panel: Tabbed syllabus checklist, Chatbot, Notes */}
           <div className="w-full md:w-[440px] border-t md:border-t-0 md:border-l border-zinc-200 bg-zinc-50 flex flex-col flex-shrink-0 min-h-0 h-full">
             {/* Right Tabs */}
-            <div className="flex border-b border-zinc-200 bg-white p-2 gap-1 flex-shrink-0 flex-wrap">
+            <div className="flex border-b border-zinc-200 bg-white p-2 gap-1 flex-shrink-0 overflow-x-auto">
               <button
                 onClick={() => setWorkspaceTab("syllabus")}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-[65px] ${
+                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-0 whitespace-nowrap px-2 ${
                   workspaceTab === "syllabus"
                     ? "bg-indigo-50 text-indigo-700"
                     : "text-zinc-500 hover:bg-zinc-100"
@@ -1491,7 +1700,7 @@ export default function DashboardPage() {
               </button>
               <button
                 onClick={() => setWorkspaceTab("chat")}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-[65px] ${
+                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-0 whitespace-nowrap px-2 ${
                   workspaceTab === "chat"
                     ? "bg-indigo-50 text-indigo-700"
                     : "text-zinc-500 hover:bg-zinc-100"
@@ -1501,7 +1710,7 @@ export default function DashboardPage() {
               </button>
               <button
                 onClick={() => setWorkspaceTab("notes")}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-[65px] ${
+                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-0 whitespace-nowrap px-2 ${
                   workspaceTab === "notes"
                     ? "bg-indigo-50 text-indigo-700"
                     : "text-zinc-500 hover:bg-zinc-100"
@@ -1511,7 +1720,7 @@ export default function DashboardPage() {
               </button>
               <button
                 onClick={() => setWorkspaceTab("quiz")}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-[65px] ${
+                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-0 whitespace-nowrap px-2 ${
                   workspaceTab === "quiz"
                     ? "bg-indigo-50 text-indigo-700"
                     : "text-zinc-500 hover:bg-zinc-100"
@@ -1521,19 +1730,29 @@ export default function DashboardPage() {
               </button>
               <button
                 onClick={() => setWorkspaceTab("assignment")}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-[85px] ${
+                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-0 whitespace-nowrap px-2 ${
                   workspaceTab === "assignment"
                     ? "bg-indigo-50 text-indigo-700"
                     : "text-zinc-500 hover:bg-zinc-100"
                 }`}
               >
-                Assignment
+                Tasks
+              </button>
+              <button
+                onClick={() => setWorkspaceTab("group")}
+                className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all min-w-0 whitespace-nowrap px-2 ${
+                  workspaceTab === "group"
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-zinc-500 hover:bg-zinc-100"
+                }`}
+              >
+                Group
               </button>
             </div>
 
             {/* Tab Body */}
             <div className={`flex-1 min-h-0 ${
-              workspaceTab === "chat" || workspaceTab === "notes"
+              workspaceTab === "chat" || workspaceTab === "notes" || workspaceTab === "group"
                 ? "overflow-hidden p-0"
                 : "overflow-y-auto p-4"
             }`}>
@@ -2090,9 +2309,184 @@ export default function DashboardPage() {
                 </div>
               )}
 
+              {/* TAB 6: Group Chat */}
+              {workspaceTab === "group" && (
+                <div className="flex flex-col h-full bg-white border-l border-zinc-200 overflow-hidden">
+                  
+                  {/* ── Group Header ── */}
+                  <div className="border-b border-zinc-100 px-4 py-2.5 flex items-center justify-between bg-gradient-to-r from-indigo-50/60 to-white flex-shrink-0">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                        <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-bold text-zinc-900 leading-tight">Group Study Room</div>
+                        {activeGroup ? (
+                          <div className="flex items-center gap-2 text-[9px] text-indigo-500 font-medium">
+                            <span className="bg-indigo-100 px-1 rounded">Code: {activeGroup.code}</span>
+                            <span>•</span>
+                            <span>{activeGroup.memberCount} active member{activeGroup.memberCount === 1 ? "" : "s"}</span>
+                          </div>
+                        ) : (
+                          <div className="text-[9px] text-zinc-500 font-medium">
+                            Collaborate with others
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {activeGroup && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(activeGroup.code);
+                            alert("Invite code copied to clipboard!");
+                          }}
+                          className="text-[10px] text-zinc-500 hover:text-indigo-600 font-semibold px-2 py-1 rounded-lg hover:bg-zinc-100 transition-all border border-zinc-200"
+                        >
+                          Copy Code
+                        </button>
+                        <button
+                          onClick={handleLeaveGroup}
+                          className="text-[10px] text-rose-600 hover:text-rose-700 font-semibold px-2 py-1 rounded-lg hover:bg-rose-50 transition-all border border-rose-200"
+                        >
+                          Leave
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Chat Messages or Onboarding/Form ── */}
+                  {!activeGroup ? (
+                    <div className="flex-1 p-6 overflow-y-auto space-y-6 flex flex-col justify-center text-center bg-white">
+                      <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg text-3xl">
+                        👥
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-zinc-800">Group Study Room</h4>
+                        <p className="mt-1 text-xs text-zinc-500 max-w-[280px] mx-auto leading-relaxed">
+                          Invite friends to study this course together! Chat in real-time and discuss lessons.
+                        </p>
+                      </div>
+
+                      <div className="space-y-4 max-w-[280px] mx-auto w-full pt-2">
+                        {/* Option 1: Create Group */}
+                        <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-200 text-left">
+                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Option 1: Host a group</p>
+                          <button
+                            onClick={handleCreateGroup}
+                            disabled={isJoiningOrCreating}
+                            className="w-full text-center rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 text-xs font-bold shadow-sm transition-all"
+                          >
+                            {isJoiningOrCreating ? "Creating Room..." : "Create Study Group"}
+                          </button>
+                        </div>
+
+                        {/* Option 2: Join Group */}
+                        <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-200 text-left">
+                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Option 2: Join a group</p>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={joinCodeInput}
+                              onChange={(e) => setJoinCodeInput(e.target.value)}
+                              placeholder="Enter Code"
+                              className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs outline-none focus:border-indigo-400 transition-all uppercase text-zinc-800"
+                            />
+                            <button
+                              onClick={handleJoinGroup}
+                              disabled={isJoiningOrCreating || !joinCodeInput.trim()}
+                              className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                            >
+                              Join
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Message Thread */}
+                      <div className="flex-1 p-4 overflow-y-auto space-y-4 min-h-0 bg-zinc-50">
+                        {groupMessages.length === 0 ? (
+                          <div className="h-full flex flex-col items-center justify-center text-center px-4 gap-2">
+                            <span className="text-3xl animate-bounce">👋</span>
+                            <p className="text-xs font-bold text-zinc-700">Welcome to the study group!</p>
+                            <p className="text-[10px] text-zinc-500 max-w-[200px]">
+                              Say hello to your fellow learners! Invite code is <strong className="text-indigo-600">{activeGroup.code}</strong>.
+                            </p>
+                          </div>
+                        ) : (
+                          groupMessages.map((msg, index) => {
+                            const isMe = msg.senderEmail === email;
+                            return (
+                              <div key={msg.id || index} className={`flex flex-col ${isMe ? "items-end" : "items-start"} space-y-0.5`}>
+                                {/* Sender Info */}
+                                <div className="flex items-center gap-1.5 px-1">
+                                  <span className="text-[9px] font-bold text-zinc-500 capitalize">{msg.senderName}</span>
+                                  {isMe && <span className="text-[8px] bg-indigo-50 text-indigo-600 font-bold px-1 rounded">You</span>}
+                                </div>
+                                
+                                {/* Bubble */}
+                                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs shadow-sm leading-relaxed ${
+                                  isMe
+                                    ? "bg-indigo-600 text-white rounded-br-none"
+                                    : "bg-white border border-zinc-200 text-zinc-800 rounded-bl-none"
+                                }`}>
+                                  <p className="whitespace-pre-line">{msg.message}</p>
+                                </div>
+
+                                {/* Timestamp */}
+                                <span className="text-[8px] text-zinc-400 px-1">
+                                  {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
+                        <div ref={groupChatBottomRef} />
+                      </div>
+
+                      {/* Chat Input */}
+                      <form onSubmit={handleSendGroupMessage} className="border-t border-zinc-200 p-2.5 flex items-end gap-2 bg-white flex-shrink-0">
+                        <textarea
+                          rows={1}
+                          placeholder="Type a message to group…"
+                          value={groupChatInput}
+                          onChange={(e) => {
+                            setGroupChatInput(e.target.value);
+                            e.target.style.height = "auto";
+                            e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendGroupMessage();
+                            }
+                          }}
+                          disabled={groupChatLoading}
+                          className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-900 placeholder-zinc-400 outline-none focus:border-indigo-400 focus:bg-white transition-all overflow-hidden"
+                          style={{ minHeight: "36px", maxHeight: "96px" }}
+                        />
+                        <button
+                          type="submit"
+                          disabled={groupChatLoading || !groupChatInput.trim()}
+                          className="h-9 w-9 flex items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 transition-all flex-shrink-0"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                          </svg>
+                        </button>
+                      </form>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
+
 
         {recapOpen && (
           <RecapModal
@@ -2207,6 +2601,10 @@ export default function DashboardPage() {
             getCourseStats={getCourseStats}
             openClassroomWorkspace={openClassroomWorkspace}
             onBack={() => setView("home")}
+            joinCodeInput={joinCodeInput}
+            setJoinCodeInput={setJoinCodeInput}
+            handleJoinGroup={handleJoinGroup}
+            isJoiningOrCreating={isJoiningOrCreating}
           />
         ) : view === "analytics" ? (
           <AnalyticsPage
@@ -2239,6 +2637,8 @@ export default function DashboardPage() {
             Pick up where you left off, or explore fresh videos picked for your interests.
           </p>
         </section>
+
+
 
         {/* Daily Review (spaced repetition) */}
         {/* <section className="mb-10 flex flex-col gap-4 overflow-hidden rounded-2xl border border-indigo-100 bg-indigo-50/40 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -2825,6 +3225,10 @@ interface MyClassroomsPageProps {
   getCourseStats: (record: ClassroomRecord) => CourseStats;
   openClassroomWorkspace: (record: ClassroomRecord) => void;
   onBack: () => void;
+  joinCodeInput: string;
+  setJoinCodeInput: (v: string) => void;
+  handleJoinGroup: () => Promise<void>;
+  isJoiningOrCreating: boolean;
 }
 
 function MyClassroomsPage({
@@ -2842,7 +3246,12 @@ function MyClassroomsPage({
   getCourseStats,
   openClassroomWorkspace,
   onBack,
+  joinCodeInput,
+  setJoinCodeInput,
+  handleJoinGroup,
+  isJoiningOrCreating,
 }: MyClassroomsPageProps) {
+  const [showJoinModal, setShowJoinModal] = useState(false);
   const tabs = [
     { key: "all", label: "All", count: totalCourses },
     { key: "pending", label: "In Progress", count: pendingCourses },
@@ -2862,13 +3271,85 @@ function MyClassroomsPage({
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900">My Classrooms</h1>
           <p className="text-sm text-zinc-500">
             {totalCourses} {totalCourses === 1 ? "course" : "courses"} • {completedCourses} completed • {pendingCourses} in progress
           </p>
         </div>
+        <button
+          onClick={() => setShowJoinModal(true)}
+          className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 text-xs font-bold shadow-sm transition-all active:scale-95"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
+          Join Group
+        </button>
       </section>
+
+      {/* Join Group Modal */}
+      {showJoinModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowJoinModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl border border-zinc-200 w-full max-w-md mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="bg-indigo-600 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Join Study Group</h3>
+                  <p className="text-xs text-indigo-100 font-medium">Enter the invite code shared by your friend</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1.5">Invite Code</label>
+                <input
+                  type="text"
+                  value={joinCodeInput}
+                  onChange={(e) => setJoinCodeInput(e.target.value)}
+                  placeholder="e.g. AB12CD"
+                  autoFocus
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-mono tracking-widest text-center outline-none focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 transition-all uppercase text-zinc-800"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && joinCodeInput.trim()) {
+                      handleJoinGroup();
+                      setShowJoinModal(false);
+                    }
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400 text-center">
+                The group's course syllabus will be automatically added to your classrooms.
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-zinc-50 border-t border-zinc-100 flex gap-3">
+              <button
+                onClick={() => setShowJoinModal(false)}
+                className="flex-1 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { handleJoinGroup(); setShowJoinModal(false); }}
+                disabled={isJoiningOrCreating || !joinCodeInput.trim()}
+                className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+              >
+                {isJoiningOrCreating ? "Joining..." : "Join Group"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toolbar: tabs + search */}
       <section className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
